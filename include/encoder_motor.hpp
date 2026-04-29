@@ -5,7 +5,15 @@
 
 class EncoderMotor {
 public:
-    EncoderMotor(uint8_t enc_a, uint8_t enc_b, uint8_t pwm_pin, uint8_t dir_pin, float gear_ratio, float raw_cpr);
+    EncoderMotor(
+        uint8_t enc_a,
+        uint8_t enc_b,
+        uint8_t pwm_pin,
+        uint8_t in_a_pin,
+        uint8_t in_b_pin,
+        uint8_t enable_pin,
+        float gear_ratio,
+        float raw_cpr);
 
     void begin();
     void update_velocity(float dt_s);
@@ -30,7 +38,9 @@ private:
     uint8_t m_enc_a;
     uint8_t m_enc_b;
     uint8_t m_pwm_pin;
-    uint8_t m_dir_pin;
+    uint8_t m_in_a_pin;
+    uint8_t m_in_b_pin;
+    uint8_t m_enable_pin;
     float m_gear_ratio;
     float m_raw_cpr;
     PIDController m_pid;

@@ -3,14 +3,31 @@
 EncoderMotor* EncoderMotor::s_left_instance = nullptr;
 EncoderMotor* EncoderMotor::s_right_instance = nullptr;
 
-EncoderMotor::EncoderMotor(uint8_t enc_a, uint8_t enc_b, uint8_t pwm_pin, uint8_t dir_pin, float gear_ratio, float raw_cpr)
-    : m_enc_a(enc_a), m_enc_b(enc_b), m_pwm_pin(pwm_pin), m_dir_pin(dir_pin), m_gear_ratio(gear_ratio), m_raw_cpr(raw_cpr) {}
+EncoderMotor::EncoderMotor(
+    uint8_t enc_a,
+    uint8_t enc_b,
+    uint8_t pwm_pin,
+    uint8_t in_a_pin,
+    uint8_t in_b_pin,
+    uint8_t enable_pin,
+    float gear_ratio,
+    float raw_cpr)
+    : m_enc_a(enc_a),
+      m_enc_b(enc_b),
+      m_pwm_pin(pwm_pin),
+      m_in_a_pin(in_a_pin),
+      m_in_b_pin(in_b_pin),
+      m_enable_pin(enable_pin),
+      m_gear_ratio(gear_ratio),
+      m_raw_cpr(raw_cpr) {}
 
 void EncoderMotor::begin() {
     pinMode(m_enc_a, INPUT_PULLUP);
     pinMode(m_enc_b, INPUT_PULLUP);
     pinMode(m_pwm_pin, OUTPUT);
-    pinMode(m_dir_pin, OUTPUT);
+    pinMode(m_in_a_pin, OUTPUT);
+    pinMode(m_in_b_pin, OUTPUT);
+    pinMode(m_enable_pin, INPUT_PULLUP);
     stop();
 
     if (s_left_instance == nullptr) {
@@ -54,6 +71,8 @@ void EncoderMotor::set_pwm_limit(int limit) {
 
 void EncoderMotor::stop() {
     analogWrite(m_pwm_pin, 0);
+    digitalWrite(m_in_a_pin, LOW);
+    digitalWrite(m_in_b_pin, LOW);
 }
 
 void EncoderMotor::tick_control(float dt_s) {
@@ -82,6 +101,12 @@ void EncoderMotor::handle_interrupt() {
 }
 
 void EncoderMotor::write_power(int power) {
-    digitalWrite(m_dir_pin, power >= 0 ? HIGH : LOW);
+    if (power == 0) {
+        stop();
+        return;
+    }
+
+    digitalWrite(m_in_a_pin, power > 0 ? HIGH : LOW);
+    digitalWrite(m_in_b_pin, power > 0 ? LOW : HIGH);
     analogWrite(m_pwm_pin, abs(power));
 }
