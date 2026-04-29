@@ -67,3 +67,15 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+
+# PlatformIO
+.pio/
+.pio-core/
+.vscode/
+*.elf
+*.bin
+*.map
+
+# Root-level duplicate datasheets; canonical copies live in docs/datasheet.
+/DG01D-E-sparkfun_Datasheet.pdf
+/pololu-25d-metal-gearmotors.pdf
