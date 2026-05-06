@@ -6,8 +6,8 @@
 // these values while testing.
 namespace robot_config {
 
-constexpr const char* WIFI_SSID = "爸爸";
-constexpr const char* WIFI_PASSWORD = "yu200702";
+constexpr const char* WIFI_SSID = "PhaseSpaceNetwork_2.4G";
+constexpr const char* WIFI_PASSWORD = "8igMacNet";
 constexpr uint16_t UDP_PORT = 4210;
 
 // Starter pin map. Adjust to match the motor driver you choose.
@@ -26,7 +26,24 @@ constexpr uint8_t RIGHT_IN_B = 8;
 constexpr uint8_t RIGHT_PWM = 10;
 constexpr uint8_t RIGHT_ENABLE = 12;
 
-constexpr float MOTOR_GEAR_RATIO = (22.0f / 12.0f) * (22.0f / 10.0f) * (24.0f / 10.0f);
+constexpr float MOTOR_GEAR_RATIO = 50.0f;
 constexpr float MOTOR_RAW_CPR = 24.0f;
+
+// QTR reflectance sensor array test pin map. On Arduino GIGA, A8-A11 are
+// special analog-only pins, so qtr_test_app.cpp maps these indexes explicitly.
+constexpr uint8_t QTR_FIRST_ANALOG_PIN = 1;
+constexpr size_t QTR_SENSOR_COUNT = 9;
+
+// Set to 255 if the emitter LEDs are wired directly to power.
+constexpr uint8_t QTR_EMITTER_PIN = 255;
+
+// Flip this after checking raw values if black tape gives lower readings.
+constexpr bool QTR_LINE_IS_HIGH_RAW = true;
+constexpr bool QTR_FOLLOW_BLACK_LINE = true;
+constexpr uint8_t QTR_RAW_SAMPLE_COUNT = 8;
+constexpr uint8_t QTR_SMOOTHING_PERCENT = 35;
+constexpr uint16_t QTR_LINE_DETECT_ON_THRESHOLD = 650;
+constexpr uint16_t QTR_LINE_DETECT_OFF_THRESHOLD = 450;
+constexpr uint16_t QTR_SURFACE_DECISION_MARGIN = 120;
 
 }
