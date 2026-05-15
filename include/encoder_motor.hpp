@@ -16,6 +16,9 @@ public:
         float raw_cpr);
 
     void begin();
+    void begin_encoder_only();
+    void begin_encoder_polling_only();
+    void poll_encoder();
     void update_velocity(float dt_s);
     void set_target_rad_s(float target_rad_s);
     void set_pid(float kp, float ki, float kd);
@@ -29,6 +32,7 @@ public:
 private:
     static void isr_left();
     static void isr_right();
+    void begin_encoder_inputs();
     void handle_interrupt();
     void write_power(int power);
 
@@ -48,4 +52,6 @@ private:
     long m_prev_count = 0;
     float m_velocity_rad_s = 0.0f;
     int m_pwm_limit = 180;
+    bool m_prev_enc_a = false;
+    bool m_encoder_inputs_started = false;
 };

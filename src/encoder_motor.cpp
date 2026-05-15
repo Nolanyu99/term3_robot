@@ -22,21 +22,51 @@ EncoderMotor::EncoderMotor(
       m_raw_cpr(raw_cpr) {}
 
 void EncoderMotor::begin() {
-    pinMode(m_enc_a, INPUT_PULLUP);
-    pinMode(m_enc_b, INPUT_PULLUP);
+    begin_encoder_only();
     pinMode(m_pwm_pin, OUTPUT);
     pinMode(m_in_a_pin, OUTPUT);
     pinMode(m_in_b_pin, OUTPUT);
     pinMode(m_enable_pin, INPUT_PULLUP);
     stop();
+}
+
+void EncoderMotor::begin_encoder_only() {
+    begin_encoder_inputs();
+
+    if (s_left_instance == this || s_right_instance == this) {
+        return;
+    }
+
+    const int interrupt_number = digitalPinToInterrupt(m_enc_a);
+    if (interrupt_number == NOT_AN_INTERRUPT) {
+        return;
+    }
 
     if (s_left_instance == nullptr) {
         s_left_instance = this;
-        attachInterrupt(digitalPinToInterrupt(m_enc_a), EncoderMotor::isr_left, CHANGE);
+        attachInterrupt(interrupt_number, EncoderMotor::isr_left, CHANGE);
     } else if (s_right_instance == nullptr) {
         s_right_instance = this;
-        attachInterrupt(digitalPinToInterrupt(m_enc_a), EncoderMotor::isr_right, CHANGE);
+        attachInterrupt(interrupt_number, EncoderMotor::isr_right, CHANGE);
     }
+}
+
+void EncoderMotor::begin_encoder_polling_only() {
+    begin_encoder_inputs();
+}
+
+void EncoderMotor::poll_encoder() {
+    if (!m_encoder_inputs_started) {
+        begin_encoder_polling_only();
+    }
+
+    const bool enc_a = digitalRead(m_enc_a);
+    if (enc_a == m_prev_enc_a) {
+        return;
+    }
+
+    m_prev_enc_a = enc_a;
+    handle_interrupt();
 }
 
 void EncoderMotor::update_velocity(float dt_s) {
@@ -90,6 +120,13 @@ void EncoderMotor::isr_right() {
     if (s_right_instance != nullptr) {
         s_right_instance->handle_interrupt();
     }
+}
+
+void EncoderMotor::begin_encoder_inputs() {
+    pinMode(m_enc_a, INPUT_PULLUP);
+    pinMode(m_enc_b, INPUT_PULLUP);
+    m_prev_enc_a = digitalRead(m_enc_a);
+    m_encoder_inputs_started = true;
 }
 
 void EncoderMotor::handle_interrupt() {

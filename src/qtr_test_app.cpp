@@ -6,9 +6,10 @@ namespace {
 
 constexpr unsigned long SERIAL_WAIT_TIMEOUT_MS = 3000;
 constexpr unsigned long CALIBRATION_TIME_MS = 5000;
-constexpr unsigned long STATUS_INTERVAL_MS = 500;
+constexpr unsigned long STATUS_INTERVAL_MS = 100;
 constexpr uint16_t ANALOG_MAX_VALUE = 4095;
 constexpr uint16_t EMITTER_DISABLED_PIN = 255;
+constexpr bool PRINT_VERBOSE_STATUS = false;
 
 uint16_t raw_values[robot_config::QTR_SENSOR_COUNT] = {};
 uint16_t min_values[robot_config::QTR_SENSOR_COUNT] = {};
@@ -146,6 +147,21 @@ bool update_line_found() {
     return line_detected;
 }
 
+uint16_t line_peak() {
+    uint16_t peak = 0;
+    for (size_t i = 0; i < robot_config::QTR_SENSOR_COUNT; ++i) {
+        const uint16_t target_value = robot_config::QTR_FOLLOW_BLACK_LINE ? calibrated_values[i] : 1000 - calibrated_values[i];
+        if (target_value > peak) {
+            peak = target_value;
+        }
+    }
+    return peak;
+}
+
+size_t sensor_label(size_t sensor_index) {
+    return sensor_index + 1;
+}
+
 void print_values(const char* label, const uint16_t* values) {
     Serial.print(label);
     Serial.print(": ");
@@ -154,7 +170,7 @@ void print_values(const char* label, const uint16_t* values) {
             Serial.print(' ');
         }
         Serial.print('S');
-        Serial.print(i);
+        Serial.print(sensor_label(i));
         Serial.print('=');
         Serial.print(values[i]);
     }
@@ -169,7 +185,7 @@ void print_surface_values() {
         }
 
         Serial.print('S');
-        Serial.print(i);
+        Serial.print(sensor_label(i));
         Serial.print('=');
 
         const uint16_t black_value = calibrated_values[i];
@@ -177,20 +193,49 @@ void print_surface_values() {
 
         if (black_value >= white_value + robot_config::QTR_SURFACE_DECISION_MARGIN) {
             Serial.print("black");
-        } else if (white_value >= black_value + robot_config::QTR_SURFACE_DECISION_MARGIN) {
-            Serial.print("white");
         } else {
-            Serial.print("unknown");
+            Serial.print("white");
         }
     }
     Serial.println();
+}
+
+void print_compact_values(const char* label, const uint16_t* values) {
+    Serial.print(label);
+    Serial.print("=[");
+    for (size_t i = 0; i < robot_config::QTR_SENSOR_COUNT; ++i) {
+        if (i > 0) {
+            Serial.print(',');
+        }
+        Serial.print(values[i]);
+    }
+    Serial.print(']');
+}
+
+void print_compact_surfaces() {
+    Serial.print("surface=[");
+    for (size_t i = 0; i < robot_config::QTR_SENSOR_COUNT; ++i) {
+        if (i > 0) {
+            Serial.print(',');
+        }
+
+        const uint16_t black_value = calibrated_values[i];
+        const uint16_t white_value = 1000 - calibrated_values[i];
+
+        if (black_value >= white_value + robot_config::QTR_SURFACE_DECISION_MARGIN) {
+            Serial.print('B');
+        } else {
+            Serial.print('W');
+        }
+    }
+    Serial.print(']');
 }
 
 void print_pin_map() {
     Serial.println("QTR analog pin map:");
     for (size_t i = 0; i < robot_config::QTR_SENSOR_COUNT; ++i) {
         Serial.print("S");
-        Serial.print(i);
+        Serial.print(sensor_label(i));
         Serial.print("=A");
         Serial.print(analog_pin_index_for_sensor(i));
         if (i + 1 < robot_config::QTR_SENSOR_COUNT) {
@@ -216,20 +261,42 @@ void print_pin_map() {
 
 void print_status() {
     update_calibrated_values();
-    print_values("raw", raw_values);
+
+    if (PRINT_VERBOSE_STATUS) {
+        print_values("raw", raw_values);
+        if (calibration_done) {
+            print_values("cal", calibrated_values);
+            print_surface_values();
+            const bool found = update_line_found();
+            digitalWrite(LED_BUILTIN, found ? HIGH : LOW);
+            Serial.print("found=");
+            Serial.println(found ? 1 : 0);
+            Serial.print("line=");
+            if (!found) {
+                Serial.println("not detected");
+            } else {
+                Serial.println(estimate_line_position());
+            }
+        }
+        Serial.println();
+        return;
+    }
+
+    Serial.print(calibration_done ? "qtr " : "calibrating ");
+    print_compact_values("raw", raw_values);
     if (calibration_done) {
-        print_values("cal", calibrated_values);
-        print_surface_values();
         const bool found = update_line_found();
         digitalWrite(LED_BUILTIN, found ? HIGH : LOW);
-        Serial.print("found=");
-        Serial.println(found ? 1 : 0);
-        Serial.print("line=");
-        if (!found) {
-            Serial.println("not detected");
-        } else {
-            Serial.println(estimate_line_position());
-        }
+        Serial.print(" ");
+        print_compact_values("cal", calibrated_values);
+        Serial.print(" ");
+        print_compact_surfaces();
+        Serial.print(" peak=");
+        Serial.print(line_peak());
+        Serial.print(" found=");
+        Serial.print(found ? 1 : 0);
+        Serial.print(" line=");
+        Serial.print(found ? estimate_line_position() : -1);
     }
     Serial.println();
 }
