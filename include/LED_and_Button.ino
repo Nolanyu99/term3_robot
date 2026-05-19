@@ -1,19 +1,21 @@
 const int redPin = 9;
 const int bluePin = 10;
 const int greenPin = 11;
-const int buttonPin = 2;
+const int OffButtonPin = 2;
+const int RevButtonPin = 40
 
 bool previousStateRed = false;
 bool state = true;
-bool Reviving = true;
-int previousButtonPressed = 1;
+bool Reviving = false;
+int previousOffButtonPressed = 1;
 
 void setup() {
   pinMode(redPin, OUTPUT);
   pinMode(bluePin, OUTPUT);
   pinMode(greenPin, OUTPUT);
   
-  pinMode(buttonPin, INPUT_PULLUP);
+  pinMode(OffButtonPin, INPUT_PULLUP);
+  pinMode(RevButtonPin, INPUT_PULLUP);
   
   Serial.begin(115200); delay(2000);
   Serial.println("starting...");
@@ -35,10 +37,16 @@ void Flash(bool previousStateRed) {
 }
 
 void loop() {
-  int buttonPressed = digitalRead(buttonPin);
+  int OffButtonPressed = digitalRead(OffButtonPin);
+  int RevButtonPressed = digitalRead(RevButtonPin);
+  
+  Reviving = false
 
-  if (buttonPressed == 0 && previousButtonPressed = 0) {
+  if (OffButtonPressed == 0 && previousOffButtonPressed == 0) {
     state = !state;
+  }
+  else if (RevButtonPressed == 0) {
+    Reviving = true;
   }
   
   if (!state) {
@@ -54,5 +62,5 @@ void loop() {
       digitalWrite(bluePin, LOW);
     }
   }
-  previousButtonPressed = buttonPressed
+  previousOffButtonPressed = OffButtonPressed;
 }
