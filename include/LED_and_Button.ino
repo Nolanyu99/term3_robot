@@ -1,26 +1,29 @@
-const int redPin = 9;
-const int bluePin = 10;
-const int greenPin = 11;
-const int buttonPin = 2;
+const int redPin = 39;
+const int greenPin = 35;
+const int bluePin = 37;
+const int OffButtonPin = 33;
+const int RevButtonPin = 13;
 
-bool previousStateRed = false;
+int previousStateRed = 0;
 bool state = true;
-bool Reviving = true;
-int previousButtonPressed = 1;
+bool Reviving = false;
+int previousOffButtonPressed = 1;
 
 void setup() {
   pinMode(redPin, OUTPUT);
   pinMode(bluePin, OUTPUT);
   pinMode(greenPin, OUTPUT);
   
-  pinMode(buttonPin, INPUT_PULLUP);
+  pinMode(OffButtonPin, INPUT_PULLUP);
+  pinMode(RevButtonPin, INPUT_PULLUP);
   
-  Serial.begin(115200); delay(2000);
+  Serial.begin(115200);
+  delay(2000);
   Serial.println("starting...");
 }
 
-void Flash(bool previousStateRed) {
-  if (previousStateRed) {
+void Flash(int previousStateRed) {
+  if (previousStateRed % 20 <= 9) {
     Serial.print("Red\n");
     digitalWrite(redPin, HIGH);
     digitalWrite(greenPin, LOW);
@@ -35,15 +38,31 @@ void Flash(bool previousStateRed) {
 }
 
 void loop() {
-  int buttonPressed = digitalRead(buttonPin);
+  int OffButtonPressed = digitalRead(OffButtonPin);
+  Serial.print("OffButtonPressed ");
+  Serial.println(OffButtonPressed);
+  Serial.print("previousOffButtonPressed: ");
+  Serial.println(previousOffButtonPressed);
+  int RevButtonPressed = digitalRead(RevButtonPin);
+  Serial.print("RevButtonPressed ");
+  Serial.println(RevButtonPressed);
+  Serial.println("------------");
+  
+  Reviving = false;
 
-  if (buttonPressed == 0 && previousButtonPressed = 0) {
+  if (OffButtonPressed == 0 && previousOffButtonPressed != 0) {
     state = !state;
+    delay(50);
+  }
+  else if (RevButtonPressed == 0) {
+    Reviving = true;
+    delay(50);
   }
   
   if (!state) {
     Flash(previousStateRed);
-    previousStateRed = !previousStateRed; delay(1000);
+    previousStateRed++;
+    delay(25);
   }
   else {
     //rest of code
@@ -52,7 +71,14 @@ void loop() {
       digitalWrite(redPin, LOW);
       digitalWrite(greenPin, HIGH);
       digitalWrite(bluePin, LOW);
+      delay(500);
+    }
+    else {
+      digitalWrite(redPin, HIGH);
+      digitalWrite(greenPin, LOW);
+      digitalWrite(bluePin, LOW);
+      delay(50);
     }
   }
-  previousButtonPressed = buttonPressed
+  previousOffButtonPressed = OffButtonPressed;
 }
