@@ -75,6 +75,7 @@ Testing/
 *.elf
 *.bin
 *.map
+include/secrets.h
 
 # Root-level duplicate datasheets; canonical copies live in docs/datasheet.
 /DG01D-E-sparkfun_Datasheet.pdf

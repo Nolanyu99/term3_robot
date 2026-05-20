@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <MFRC522_I2C.h>
+#include <MiniMessenger.h>
 #include <Motoron.h>
 #include <Wire.h>
 
@@ -7,11 +8,23 @@
 #include "serial_logger.hpp"
 #include "task_scheduler.hpp"
 
+#if __has_include("secrets.h")
+#include "secrets.h"
+#else
+#include "secrets.example.h"
+#endif
+
+#ifndef BOARD_ID
+#define BOARD_ID "Terminator"
+#endif
+
 namespace {
 
 constexpr unsigned long BUTTON_DEBOUNCE_MS = 50;
 constexpr unsigned long MOTOR_UPDATE_INTERVAL_MS = 50;
+constexpr unsigned long MESSENGER_UPDATE_INTERVAL_MS = 10;
 constexpr unsigned long QTR_UPDATE_INTERVAL_MS = 100;
+constexpr unsigned long REGISTER_INTERVAL_MS = 10000;
 constexpr unsigned long STATUS_INTERVAL_MS = 500;
 constexpr unsigned long STOP_LED_BLINK_INTERVAL_MS = 250;
 constexpr unsigned long QTR_CALIBRATION_TIME_MS = 5000;
@@ -74,6 +87,7 @@ const uint8_t qtr_rc_sensor_pins[robot_config::QTR_SENSOR_COUNT] = {
 };
 
 TaskScheduler scheduler;
+MiniMessenger messenger;
 MotoronI2C motoron;
 MFRC522_I2C rfid(robot_config::RFID_I2C_ADDRESS, robot_config::RFID_RESET_PIN, &Wire1);
 
@@ -81,6 +95,7 @@ bool motoron_ready = false;
 bool rfid_ready = false;
 bool rfid_seen = false;
 bool stopped_by_button = robot_config::ENABLE_MECHANICAL_KILL_BUTTON;
+bool stopped_by_server = true;
 bool revive_button_pressed = false;
 bool red_blink_on = true;
 char last_rfid_uid[32] = "none";
@@ -92,6 +107,7 @@ int stable_revive_button_state = HIGH;
 
 unsigned long last_button_change_ms = 0;
 unsigned long last_revive_button_change_ms = 0;
+unsigned long last_register_ms = 0;
 unsigned long step_start_ms = 0;
 unsigned long stop_started_ms = 0;
 bool was_stopped = true;
@@ -111,7 +127,7 @@ unsigned long seed_last_servo_frame_us = 0;
 unsigned long seed_state_start_ms = 0;
 
 bool robot_stopped() {
-    return stopped_by_button;
+    return stopped_by_button || stopped_by_server;
 }
 
 bool i2c_device_present(TwoWire& bus, uint8_t address) {
@@ -439,6 +455,92 @@ void update_status_led() {
         red_blink_on = !red_blink_on;
     }
     render_status_led();
+}
+
+void set_server_stop(bool stop, const char* reason) {
+    if (stopped_by_server == stop) {
+        return;
+    }
+
+    stopped_by_server = stop;
+    update_stop_transition();
+    render_status_led();
+
+    Serial.print("server_stop=");
+    Serial.print(stopped_by_server ? 1 : 0);
+    Serial.print(" reason=");
+    Serial.println(reason);
+}
+
+void handle_messenger_message(const MessageMetadata& metadata, const uint8_t* payload, size_t length) {
+    char message[160];
+    const size_t copy_length = min(length, sizeof(message) - 1);
+    memcpy(message, payload, copy_length);
+    message[copy_length] = '\0';
+
+    Serial.print("mqtt from=");
+    Serial.print(metadata.fromBoardId);
+    Serial.print(" msg=\"");
+    Serial.print(message);
+    Serial.println('"');
+
+    if (strstr(message, "type=heartbeat enable=1")) {
+        set_server_stop(false, "heartbeat_enable");
+        return;
+    }
+
+    if (strstr(message, "type=heartbeat enable=0")) {
+        set_server_stop(true, "heartbeat_disable");
+        return;
+    }
+
+    if (strstr(message, "type=emergency enabled=true")) {
+        set_server_stop(true, "emergency");
+        return;
+    }
+
+    if (strstr(message, "type=disable enabled=false")) {
+        set_server_stop(true, "disable");
+    }
+}
+
+void update_messenger() {
+    messenger.loop();
+
+    if (!messenger.isConnected()) {
+        return;
+    }
+
+    const unsigned long now_ms = millis();
+    if (last_register_ms != 0 && now_ms - last_register_ms < REGISTER_INTERVAL_MS) {
+        return;
+    }
+
+    last_register_ms = now_ms;
+
+    char registration[80];
+    snprintf(
+        registration,
+        sizeof(registration),
+        "type=register team_id=%s board_id=%s",
+        GROUP_ID,
+        BOARD_ID);
+    if (messenger.sendToBoard("server", registration)) {
+        Serial.println("mqtt_registered=1");
+    }
+}
+
+void begin_messenger() {
+    messenger.onMessage(handle_messenger_message);
+    const bool connected =
+        messenger.begin(WIFI_SSID, WIFI_PASSWORD, BROKER_HOST, BROKER_PORT, GROUP_ID, BOARD_ID);
+
+    Serial.print("messenger_begin=");
+    Serial.print(connected ? 1 : 0);
+    Serial.print(" group=");
+    Serial.print(GROUP_ID);
+    Serial.print(" board=");
+    Serial.println(BOARD_ID);
 }
 
 int angle_to_seed_servo_pulse_us(int angle) {
@@ -878,6 +980,10 @@ void print_status() {
     Serial.print(robot_stopped() ? "stopped" : "running");
     Serial.print(" button_stop=");
     Serial.print(stopped_by_button ? 1 : 0);
+    Serial.print(" server_stop=");
+    Serial.print(stopped_by_server ? 1 : 0);
+    Serial.print(" mqtt=");
+    Serial.print(messenger.isConnected() ? 1 : 0);
     Serial.print(" revive=");
     Serial.print(revive_button_pressed ? 1 : 0);
     Serial.print(" motoron=");
@@ -959,6 +1065,7 @@ void robot_app_setup() {
     render_status_led();
     begin_motoron();
     begin_rfid();
+    begin_messenger();
 
     step_start_ms = millis();
     stop_started_ms = millis();
@@ -966,6 +1073,7 @@ void robot_app_setup() {
     print_demo_step();
 
     scheduler.add(MOTOR_UPDATE_INTERVAL_MS, update_demo_motion, "motion");
+    scheduler.add(MESSENGER_UPDATE_INTERVAL_MS, update_messenger, "messenger");
     scheduler.add(1, service_seed_servo_pulses, "seed_servo");
     scheduler.add(20, update_seed_dispenser, "seed_dispense");
     scheduler.add(20, process_serial_commands, "serial");

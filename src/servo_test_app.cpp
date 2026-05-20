@@ -2,8 +2,8 @@
 
 namespace {
 
-constexpr int SERVO1_PIN = 44;  // upper gate: isolates one seed
-constexpr int SERVO2_PIN = 45;  // lower gate: releases into tube
+constexpr int SERVO1_PIN = 36;  // upper gate: isolates one seed
+constexpr int SERVO2_PIN = 38;  // lower gate: releases into tube 刚改
 
 constexpr int UPPER_CLOSED = 90;
 constexpr int UPPER_OPEN = 0;

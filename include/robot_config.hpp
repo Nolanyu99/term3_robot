@@ -24,17 +24,17 @@ constexpr bool ENABLE_SEED_DISPENSER = true;
 
 // Common-anode RGB LED on the top tapping mechanism.
 // For common-anode LEDs, 0 is on and 255 is off.
-constexpr int TOP_RGB_RED_PIN = 9;
-constexpr int TOP_RGB_BLUE_PIN = 10;
-constexpr int TOP_RGB_GREEN_PIN = 11;
+constexpr int TOP_RGB_RED_PIN = 39;//new
+constexpr int TOP_RGB_BLUE_PIN = 37;//new
+constexpr int TOP_RGB_GREEN_PIN = 35;//new
 constexpr bool TOP_RGB_COMMON_ANODE = true;
 
 // Mechanical kill switch button. Uses INPUT_PULLUP: pressed = LOW.
-constexpr int MECHANICAL_KILL_BUTTON_PIN = 2;
+constexpr int MECHANICAL_KILL_BUTTON_PIN = 33;//new
 
 // Front revive interface button. Uses INPUT_PULLUP: pressed = LOW.
-// D50 is used by the QTR-RC array in the integrated demo, so use a free pin.
-constexpr int REVIVE_BUTTON_PIN = 40;
+// Keep this off the current QTR-RC/IR test pins.
+constexpr int REVIVE_BUTTON_PIN = 13;//new
 
 // Starter pin map. Adjust to match the motor driver you choose.
 constexpr uint8_t LEFT_ENC_A = 22;
@@ -96,8 +96,8 @@ constexpr unsigned long SEED_LOWER_CLOSE_MS = 500;
 // HC-SR04 ultrasonic distance sensor test pins.
 // Echo is a 5V signal on many HC-SR04 modules; use a resistor divider before
 // feeding it into the 3.3V-only Arduino GIGA input pin.
-constexpr uint8_t ULTRASONIC_TRIG_PIN = 28;
-constexpr uint8_t ULTRASONIC_ECHO_PIN = 29;
+constexpr uint8_t ULTRASONIC_TRIG_PIN = 52;//new
+constexpr uint8_t ULTRASONIC_ECHO_PIN = 53;//new
 constexpr float ULTRASONIC_MAX_DISTANCE_CM = 400.0f;
 constexpr float ULTRASONIC_WALL_THRESHOLD_CM = 20.0f;
 
