@@ -8,8 +8,10 @@ MotoronI2C mc;
 
 constexpr uint8_t MOTOR_LEFT = 1;
 constexpr uint8_t MOTOR_RIGHT = 2;
-constexpr int16_t MAX_SPEED = 600;
+constexpr int16_t MAX_SPEED = 300;
 constexpr int16_t TURN_SPEED = 600;
+constexpr int8_t LEFT_FORWARD_SIGN = 1;
+constexpr int8_t RIGHT_FORWARD_SIGN = 1;
 constexpr uint8_t RIGHT_MOTOR_TRIM_PERCENT = 95;
 constexpr uint16_t ACCEL = 800;
 constexpr uint16_t DECEL = 800;
@@ -32,13 +34,17 @@ constexpr int16_t trim_right_speed(int16_t speed) {
 }
 
 const DemoStep demo_steps[] = {
-    {"forward", -MAX_SPEED, trim_right_speed(MAX_SPEED), FORWARD_DURATION_MS},
+    {"forward", LEFT_FORWARD_SIGN * MAX_SPEED,
+        trim_right_speed(RIGHT_FORWARD_SIGN * MAX_SPEED), FORWARD_DURATION_MS},
     {"stop", 0, 0, STOP_DURATION_MS},
-    {"left turn", TURN_SPEED, trim_right_speed(TURN_SPEED), TURN_90_DURATION_MS},
+    {"left turn", -LEFT_FORWARD_SIGN * TURN_SPEED,
+        trim_right_speed(RIGHT_FORWARD_SIGN * TURN_SPEED), TURN_90_DURATION_MS},
     {"stop", 0, 0, STOP_DURATION_MS},
-    {"right turn", -TURN_SPEED, trim_right_speed(-TURN_SPEED), TURN_90_DURATION_MS},
+    {"right turn", LEFT_FORWARD_SIGN * TURN_SPEED,
+        trim_right_speed(-RIGHT_FORWARD_SIGN * TURN_SPEED), TURN_90_DURATION_MS},
     {"stop", 0, 0, STOP_DURATION_MS},
-    {"u-turn", TURN_SPEED, trim_right_speed(TURN_SPEED), U_TURN_DURATION_MS},
+    {"u-turn", -LEFT_FORWARD_SIGN * TURN_SPEED,
+        trim_right_speed(RIGHT_FORWARD_SIGN * TURN_SPEED), U_TURN_DURATION_MS},
     {"stop", 0, 0, STOP_DURATION_MS},
 };
 

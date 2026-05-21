@@ -22,12 +22,11 @@ constexpr bool ENABLE_ULTRASONIC_STATUS = true;
 constexpr bool ENABLE_RFID_STATUS = true;
 constexpr bool ENABLE_SEED_DISPENSER = true;
 
-// Common-anode RGB LED on the top tapping mechanism.
-// For common-anode LEDs, 0 is on and 255 is off.
+// Top tapping RGB LED. Set false when HIGH=on and LOW=off.
 constexpr int TOP_RGB_RED_PIN = 39;//new
 constexpr int TOP_RGB_BLUE_PIN = 37;//new
 constexpr int TOP_RGB_GREEN_PIN = 35;//new
-constexpr bool TOP_RGB_COMMON_ANODE = true;
+constexpr bool TOP_RGB_COMMON_ANODE = false;
 
 // Mechanical kill switch button. Uses INPUT_PULLUP: pressed = LOW.
 constexpr int MECHANICAL_KILL_BUTTON_PIN = 33;//new
@@ -79,8 +78,8 @@ constexpr uint16_t QTR_SURFACE_DECISION_MARGIN = 120;
 // Two-servo seed dispenser / planter. The upper gate isolates one seed; the
 // lower gate releases it into the tube. D45 is used by the QTR-RC array in the
 // integrated demo, so the lower servo uses D43 here.
-constexpr int SEED_UPPER_SERVO_PIN = 44;
-constexpr int SEED_LOWER_SERVO_PIN = 43;
+constexpr int SEED_UPPER_SERVO_PIN = 36;
+constexpr int SEED_LOWER_SERVO_PIN = 38;
 constexpr int SEED_UPPER_CLOSED_ANGLE = 90;
 constexpr int SEED_UPPER_OPEN_ANGLE = 0;
 constexpr int SEED_LOWER_CLOSED_ANGLE = 0;

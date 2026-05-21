@@ -21,10 +21,11 @@ namespace {
 constexpr uint8_t MOTOR_LEFT = 1;
 constexpr uint8_t MOTOR_RIGHT = 2;
 constexpr uint8_t MOTOR_AUX = 3;
-constexpr int16_t TEST_SPEED = 300;
+constexpr int16_t RUN_SPEED = 300;
 constexpr uint8_t RIGHT_MOTOR_TRIM_PERCENT = 95;
 constexpr uint16_t MOTOR_ACCEL = 800;
 constexpr uint16_t MOTOR_DECEL = 800;
+constexpr unsigned long BUTTON_DEBOUNCE_MS = 50;
 constexpr unsigned long REGISTER_INTERVAL_MS = 10000;
 constexpr unsigned long STATUS_INTERVAL_MS = 1000;
 constexpr unsigned long LED_BLINK_INTERVAL_MS = 250;
@@ -33,8 +34,12 @@ MiniMessenger messenger;
 MotoronI2C motoron;
 
 bool motoron_ready = false;
-bool server_enabled = false;
+bool stopped_by_button = true;
+bool stopped_by_server = false;
 bool top_red_on = false;
+int last_kill_button_reading = HIGH;
+int stable_kill_button_state = HIGH;
+unsigned long last_kill_button_change_ms = 0;
 unsigned long last_register_ms = 0;
 unsigned long last_status_ms = 0;
 unsigned long last_led_blink_ms = 0;
@@ -45,7 +50,7 @@ constexpr int16_t trim_right_speed(int16_t speed) {
 }
 
 bool robot_stopped() {
-    return !server_enabled || !motoron_ready;
+    return stopped_by_button || stopped_by_server || !motoron_ready;
 }
 
 uint8_t rgb_level(bool on) {
@@ -175,10 +180,10 @@ void set_motor_speeds(int16_t left_speed, int16_t right_speed) {
 }
 
 void apply_motor_state() {
-    if (server_enabled) {
-        set_motor_speeds(TEST_SPEED, trim_right_speed(TEST_SPEED));
-    } else {
+    if (robot_stopped()) {
         stop_motors();
+    } else {
+        set_motor_speeds(RUN_SPEED, trim_right_speed(RUN_SPEED));
     }
     render_top_led();
 }
@@ -213,18 +218,78 @@ void begin_motoron() {
     stop_motors();
 }
 
-void set_server_enabled(bool enabled, const char* reason) {
-    if (server_enabled == enabled) {
+void print_stop_state(const char* reason) {
+    Serial.print("state=");
+    Serial.print(robot_stopped() ? "STOPPED" : "RUNNING");
+    Serial.print(" button_stop=");
+    Serial.print(stopped_by_button ? 1 : 0);
+    Serial.print(" mqtt_stop=");
+    Serial.print(stopped_by_server ? 1 : 0);
+    Serial.print(" reason=");
+    Serial.println(reason);
+}
+
+void set_button_stopped(bool stopped, const char* reason) {
+    if (stopped_by_button == stopped) {
         return;
     }
 
-    server_enabled = enabled;
+    stopped_by_button = stopped;
     apply_motor_state();
+    print_stop_state(reason);
+}
 
-    Serial.print("server_enabled=");
-    Serial.print(server_enabled ? 1 : 0);
-    Serial.print(" reason=");
-    Serial.println(reason);
+void set_server_stopped(bool stopped, const char* reason) {
+    if (stopped_by_server == stopped) {
+        return;
+    }
+
+    stopped_by_server = stopped;
+    apply_motor_state();
+    print_stop_state(reason);
+}
+
+void update_kill_button() {
+    if (!robot_config::ENABLE_MECHANICAL_KILL_BUTTON ||
+        robot_config::MECHANICAL_KILL_BUTTON_PIN < 0) {
+        return;
+    }
+
+    const int reading = digitalRead(robot_config::MECHANICAL_KILL_BUTTON_PIN);
+    const unsigned long now_ms = millis();
+
+    if (reading != last_kill_button_reading) {
+        last_kill_button_change_ms = now_ms;
+        last_kill_button_reading = reading;
+    }
+
+    if (now_ms - last_kill_button_change_ms < BUTTON_DEBOUNCE_MS ||
+        reading == stable_kill_button_state) {
+        return;
+    }
+
+    stable_kill_button_state = reading;
+    if (stable_kill_button_state == LOW) {
+        set_button_stopped(!stopped_by_button, "kill_button_press");
+    }
+}
+
+void begin_kill_button() {
+    if (!robot_config::ENABLE_MECHANICAL_KILL_BUTTON ||
+        robot_config::MECHANICAL_KILL_BUTTON_PIN < 0) {
+        return;
+    }
+
+    pinMode(robot_config::MECHANICAL_KILL_BUTTON_PIN, INPUT_PULLUP);
+    last_kill_button_reading = digitalRead(robot_config::MECHANICAL_KILL_BUTTON_PIN);
+    stable_kill_button_state = last_kill_button_reading;
+    last_kill_button_change_ms = millis();
+}
+
+bool message_contains_stop_word(const char* message) {
+    return strstr(message, "Stop") != nullptr ||
+           strstr(message, "stop") != nullptr ||
+           strstr(message, "STOP") != nullptr;
 }
 
 void on_message(const MessageMetadata& metadata, const uint8_t* payload, size_t length) {
@@ -233,28 +298,34 @@ void on_message(const MessageMetadata& metadata, const uint8_t* payload, size_t 
     memcpy(message, payload, copy_length);
     message[copy_length] = '\0';
 
-    Serial.print("Message from Board ");
+    Serial.print("mqtt from=");
     Serial.print(metadata.fromBoardId);
-    Serial.print(": ");
-    Serial.println(message);
+    Serial.print(" msg=\"");
+    Serial.print(message);
+    Serial.println('"');
 
     if (strstr(message, "type=heartbeat enable=1")) {
-        set_server_enabled(true, "heartbeat_enable");
+        set_server_stopped(false, "heartbeat_enable");
         return;
     }
 
     if (strstr(message, "type=heartbeat enable=0")) {
-        set_server_enabled(false, "heartbeat_disable");
+        set_server_stopped(true, "heartbeat_disable");
         return;
     }
 
     if (strstr(message, "type=emergency enabled=true")) {
-        set_server_enabled(false, "emergency");
+        set_server_stopped(true, "emergency");
         return;
     }
 
     if (strstr(message, "type=disable enabled=false")) {
-        set_server_enabled(false, "disable");
+        set_server_stopped(true, "disable");
+        return;
+    }
+
+    if (message_contains_stop_word(message)) {
+        set_server_stopped(true, "mqtt_stop");
     }
 }
 
@@ -268,7 +339,7 @@ void register_with_server() {
         BOARD_ID);
 
     if (messenger.sendToBoard("server", registration)) {
-        Serial.print("Registered with server: ");
+        Serial.print("mqtt_registered=1 ");
         Serial.println(registration);
     }
 }
@@ -280,8 +351,20 @@ void print_status() {
     Serial.print(messenger.isConnected() ? "connected" : "disconnected");
     Serial.print(" motoron=");
     Serial.print(motoron_ready ? 1 : 0);
-    Serial.print(" server_enabled=");
-    Serial.print(server_enabled ? 1 : 0);
+    Serial.print(" state=");
+    Serial.print(robot_stopped() ? "stopped" : "running");
+    Serial.print(" button_stop=");
+    Serial.print(stopped_by_button ? 1 : 0);
+    Serial.print(" mqtt_stop=");
+    Serial.print(stopped_by_server ? 1 : 0);
+    Serial.print(" kill_button=");
+    if (robot_config::ENABLE_MECHANICAL_KILL_BUTTON &&
+        robot_config::MECHANICAL_KILL_BUTTON_PIN >= 0) {
+        Serial.print(digitalRead(robot_config::MECHANICAL_KILL_BUTTON_PIN) == LOW ?
+            "pressed" : "released");
+    } else {
+        Serial.print("disabled");
+    }
     Serial.print(" led=");
     Serial.print(robot_stopped() ? "blinking_red" : "solid_red");
 
@@ -297,31 +380,43 @@ void print_status() {
 
 }  // namespace
 
-void motor_messenger_test_app_setup() {
+void motor_messenger_button_led_app_setup() {
     Serial.begin(115200);
     while (!Serial && millis() < 3000) {
         delay(10);
     }
 
     Serial.println();
-    Serial.println("=== GIGA R1 Motor + MiniMessenger test ===");
-    Serial.println("Lift the wheels before enabling from the dashboard.");
+    Serial.println("=== GIGA R1 Motor + MiniMessenger + Button/LED test ===");
+    Serial.println("Kill button toggles stopped/running. MQTT stop keeps the robot stopped.");
+    Serial.println("Stopped = blinking red. Running = solid red.");
     Serial.print("group=");
     Serial.print(GROUP_ID);
     Serial.print(" board=");
     Serial.println(BOARD_ID);
+    Serial.print("kill_button_pin=D");
+    Serial.println(robot_config::MECHANICAL_KILL_BUTTON_PIN);
+    Serial.print("rgb_pins R/G/B=D");
+    Serial.print(robot_config::TOP_RGB_RED_PIN);
+    Serial.print("/D");
+    Serial.print(robot_config::TOP_RGB_GREEN_PIN);
+    Serial.print("/D");
+    Serial.println(robot_config::TOP_RGB_BLUE_PIN);
 
     begin_top_led();
+    begin_kill_button();
     begin_motoron();
-    render_top_led();
+    apply_motor_state();
+    print_stop_state("startup");
 
     messenger.onMessage(on_message);
     messenger.begin(WIFI_SSID, WIFI_PASSWORD, BROKER_HOST, BROKER_PORT, GROUP_ID, BOARD_ID);
     print_status();
 }
 
-void motor_messenger_test_app_loop() {
+void motor_messenger_button_led_app_loop() {
     messenger.loop();
+    update_kill_button();
     apply_motor_state();
     update_top_led();
 

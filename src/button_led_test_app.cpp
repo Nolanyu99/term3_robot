@@ -30,13 +30,13 @@ uint8_t rgb_level(bool on) {
 
 void write_top_rgb(bool red, bool green, bool blue) {
     if (robot_config::TOP_RGB_RED_PIN >= 0) {
-        analogWrite(robot_config::TOP_RGB_RED_PIN, rgb_level(red));
+        digitalWrite(robot_config::TOP_RGB_RED_PIN, rgb_level(red));
     }
     if (robot_config::TOP_RGB_GREEN_PIN >= 0) {
-        analogWrite(robot_config::TOP_RGB_GREEN_PIN, rgb_level(green));
+        digitalWrite(robot_config::TOP_RGB_GREEN_PIN, rgb_level(green));
     }
     if (robot_config::TOP_RGB_BLUE_PIN >= 0) {
-        analogWrite(robot_config::TOP_RGB_BLUE_PIN, rgb_level(blue));
+        digitalWrite(robot_config::TOP_RGB_BLUE_PIN, rgb_level(blue));
     }
 }
 
