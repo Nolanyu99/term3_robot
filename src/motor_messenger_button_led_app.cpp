@@ -16,6 +16,10 @@
 #define BOARD_ID "1"
 #endif
 
+#ifndef ENABLE_ULTRASONIC_EMERGENCY_STOP
+#define ENABLE_ULTRASONIC_EMERGENCY_STOP 0
+#endif
+
 namespace {
 
 constexpr uint8_t MOTOR_LEFT = 1;
@@ -29,6 +33,11 @@ constexpr unsigned long BUTTON_DEBOUNCE_MS = 50;
 constexpr unsigned long REGISTER_INTERVAL_MS = 10000;
 constexpr unsigned long STATUS_INTERVAL_MS = 1000;
 constexpr unsigned long LED_BLINK_INTERVAL_MS = 250;
+constexpr unsigned long ULTRASONIC_CHECK_INTERVAL_MS = 50;
+constexpr float OBSTACLE_STOP_DISTANCE_CM = 5.0f;
+constexpr float OBSTACLE_CLEAR_DISTANCE_CM = 10.0f;
+constexpr unsigned long ULTRASONIC_ECHO_TIMEOUT_US =
+    static_cast<unsigned long>(robot_config::ULTRASONIC_MAX_DISTANCE_CM * 2.0f * 29.1f);
 
 MiniMessenger messenger;
 MotoronI2C motoron;
@@ -36,6 +45,7 @@ MotoronI2C motoron;
 bool motoron_ready = false;
 bool stopped_by_button = true;
 bool stopped_by_server = false;
+bool stopped_by_obstacle = false;
 bool top_red_on = false;
 int last_kill_button_reading = HIGH;
 int stable_kill_button_state = HIGH;
@@ -43,6 +53,8 @@ unsigned long last_kill_button_change_ms = 0;
 unsigned long last_register_ms = 0;
 unsigned long last_status_ms = 0;
 unsigned long last_led_blink_ms = 0;
+unsigned long last_ultrasonic_check_ms = 0;
+float last_front_distance_cm = -1.0f;
 
 constexpr int16_t trim_right_speed(int16_t speed) {
     return static_cast<int16_t>(
@@ -50,7 +62,7 @@ constexpr int16_t trim_right_speed(int16_t speed) {
 }
 
 bool robot_stopped() {
-    return stopped_by_button || stopped_by_server || !motoron_ready;
+    return stopped_by_button || stopped_by_server || stopped_by_obstacle || !motoron_ready;
 }
 
 uint8_t rgb_level(bool on) {
@@ -286,6 +298,74 @@ void begin_kill_button() {
     last_kill_button_change_ms = millis();
 }
 
+void begin_ultrasonic_emergency_stop() {
+    if (!ENABLE_ULTRASONIC_EMERGENCY_STOP) {
+        return;
+    }
+
+    pinMode(robot_config::ULTRASONIC_TRIG_PIN, OUTPUT);
+    pinMode(robot_config::ULTRASONIC_ECHO_PIN, INPUT);
+    digitalWrite(robot_config::ULTRASONIC_TRIG_PIN, LOW);
+    last_ultrasonic_check_ms = millis();
+}
+
+float read_front_distance_cm() {
+    if (!ENABLE_ULTRASONIC_EMERGENCY_STOP) {
+        return -1.0f;
+    }
+
+    digitalWrite(robot_config::ULTRASONIC_TRIG_PIN, LOW);
+    delayMicroseconds(2);
+    digitalWrite(robot_config::ULTRASONIC_TRIG_PIN, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(robot_config::ULTRASONIC_TRIG_PIN, LOW);
+
+    const unsigned long duration_us =
+        pulseIn(robot_config::ULTRASONIC_ECHO_PIN, HIGH, ULTRASONIC_ECHO_TIMEOUT_US);
+    if (duration_us == 0) {
+        return -1.0f;
+    }
+
+    return (duration_us * 0.0343f) / 2.0f;
+}
+
+void update_ultrasonic_emergency_stop() {
+    if (!ENABLE_ULTRASONIC_EMERGENCY_STOP) {
+        return;
+    }
+
+    const unsigned long now_ms = millis();
+    if (now_ms - last_ultrasonic_check_ms < ULTRASONIC_CHECK_INTERVAL_MS) {
+        return;
+    }
+    last_ultrasonic_check_ms = now_ms;
+
+    last_front_distance_cm = read_front_distance_cm();
+    const bool previous_stop = stopped_by_obstacle;
+
+    if (last_front_distance_cm > 0.0f) {
+        if (stopped_by_obstacle) {
+            stopped_by_obstacle = last_front_distance_cm < OBSTACLE_CLEAR_DISTANCE_CM;
+        } else {
+            stopped_by_obstacle = last_front_distance_cm < OBSTACLE_STOP_DISTANCE_CM;
+        }
+    }
+
+    if (stopped_by_obstacle == previous_stop) {
+        return;
+    }
+
+    apply_motor_state();
+    Serial.print("obstacle_stop=");
+    Serial.print(stopped_by_obstacle ? 1 : 0);
+    Serial.print(" distance_cm=");
+    if (last_front_distance_cm < 0.0f) {
+        Serial.println("out_of_range");
+    } else {
+        Serial.println(last_front_distance_cm, 1);
+    }
+}
+
 bool message_contains_stop_word(const char* message) {
     return strstr(message, "Stop") != nullptr ||
            strstr(message, "stop") != nullptr ||
@@ -357,6 +437,8 @@ void print_status() {
     Serial.print(stopped_by_button ? 1 : 0);
     Serial.print(" mqtt_stop=");
     Serial.print(stopped_by_server ? 1 : 0);
+    Serial.print(" obstacle_stop=");
+    Serial.print(stopped_by_obstacle ? 1 : 0);
     Serial.print(" kill_button=");
     if (robot_config::ENABLE_MECHANICAL_KILL_BUTTON &&
         robot_config::MECHANICAL_KILL_BUTTON_PIN >= 0) {
@@ -367,6 +449,14 @@ void print_status() {
     }
     Serial.print(" led=");
     Serial.print(robot_stopped() ? "blinking_red" : "solid_red");
+    if (ENABLE_ULTRASONIC_EMERGENCY_STOP) {
+        Serial.print(" front_cm=");
+        if (last_front_distance_cm < 0.0f) {
+            Serial.print("out_of_range");
+        } else {
+            Serial.print(last_front_distance_cm, 1);
+        }
+    }
 
     if (WiFi.status() == WL_CONNECTED) {
         Serial.print(" ip=");
@@ -396,6 +486,16 @@ void motor_messenger_button_led_app_setup() {
     Serial.println(BOARD_ID);
     Serial.print("kill_button_pin=D");
     Serial.println(robot_config::MECHANICAL_KILL_BUTTON_PIN);
+    if (ENABLE_ULTRASONIC_EMERGENCY_STOP) {
+        Serial.print("ultrasonic TRIG/ECHO=D");
+        Serial.print(robot_config::ULTRASONIC_TRIG_PIN);
+        Serial.print("/D");
+        Serial.print(robot_config::ULTRASONIC_ECHO_PIN);
+        Serial.print(" stop_cm=");
+        Serial.print(OBSTACLE_STOP_DISTANCE_CM, 1);
+        Serial.print(" clear_cm=");
+        Serial.println(OBSTACLE_CLEAR_DISTANCE_CM, 1);
+    }
     Serial.print("rgb_pins R/G/B=D");
     Serial.print(robot_config::TOP_RGB_RED_PIN);
     Serial.print("/D");
@@ -405,6 +505,7 @@ void motor_messenger_button_led_app_setup() {
 
     begin_top_led();
     begin_kill_button();
+    begin_ultrasonic_emergency_stop();
     begin_motoron();
     apply_motor_state();
     print_stop_state("startup");
@@ -417,6 +518,7 @@ void motor_messenger_button_led_app_setup() {
 void motor_messenger_button_led_app_loop() {
     messenger.loop();
     update_kill_button();
+    update_ultrasonic_emergency_stop();
     apply_motor_state();
     update_top_led();
 

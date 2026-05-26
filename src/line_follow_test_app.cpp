@@ -17,7 +17,8 @@ constexpr unsigned long SERIAL_WAIT_TIMEOUT_MS = 3000;
 constexpr unsigned long CALIBRATION_TIME_MS = 5000;
 constexpr unsigned long CONTROL_INTERVAL_MS = 30;
 constexpr unsigned long STATUS_INTERVAL_MS = 250;
-constexpr unsigned long INTERSECTION_CROSS_MS = 350;
+constexpr unsigned long INTERSECTION_CROSS_MS = 500;
+constexpr unsigned long LOST_FORWARD_MS = 250;
 
 constexpr uint8_t SENSOR_COUNT = 9;
 constexpr uint16_t LINE_POSITION_SCALE = 1000;
@@ -301,7 +302,11 @@ void update_line_following() {
 
     if (!found) {
         set_follow_state(FollowState::LostLine);
-        search_for_line();
+        if (millis() - state_start_ms < LOST_FORWARD_MS) {
+            drive_forward();
+        } else {
+            search_for_line();
+        }
         return;
     }
 

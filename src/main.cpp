@@ -78,8 +78,10 @@ void setup() {
     line_follow_test_app_setup();
 #elif APP_MODE == 17
     motor_messenger_button_led_app_setup();
+#elif APP_MODE == 18
+    motor_messenger_button_led_app_setup();
 #else
-#error "Unknown APP_MODE. Use 0=robot, 1=wifi test, 2=motor test, 3=upload test, 4=encoder test, 5=QTR test, 6=button/LED test, 7=simple Motoron test, 8=ultrasonic test, 9=servo test, 10=RFID test, 11=IR/QTR-RC test, 12=QTR library analog test, 13=MiniMessenger test, 14=motor MiniMessenger test, 15=updated IR/QTR-RC test, 16=line follow test, 17=motor MiniMessenger button/LED test."
+#error "Unknown APP_MODE. Use 0=robot, 1=wifi test, 2=motor test, 3=upload test, 4=encoder test, 5=QTR test, 6=button/LED test, 7=simple Motoron test, 8=ultrasonic test, 9=servo test, 10=RFID test, 11=IR/QTR-RC test, 12=QTR library analog test, 13=MiniMessenger test, 14=motor MiniMessenger test, 15=updated IR/QTR-RC test, 16=line follow test, 17=motor MiniMessenger button/LED test, 18=motor MiniMessenger button/LED ultrasonic stop test."
 #endif
 }
 
@@ -119,6 +121,8 @@ void loop() {
 #elif APP_MODE == 16
     line_follow_test_app_loop();
 #elif APP_MODE == 17
+    motor_messenger_button_led_app_loop();
+#elif APP_MODE == 18
     motor_messenger_button_led_app_loop();
 #endif
 }
