@@ -198,7 +198,7 @@ unsigned long lastScanTime = 0;
 
 constexpr float TARGET_SIDE_MM           = 60.0f;
 constexpr float SIDE_WALL_DETECTED_MM    = 150.0f;
-constexpr float BASE_DOOR_CLOSED_MM      = 70.0f;
+constexpr float BASE_DOOR_CLOSED_MM      = 100.0f;
 constexpr float BASE_DOOR_OPEN_MM        = 250.0f;
 constexpr float TUNNEL_DOOR_CLOSED_MM    = 50.0f;
 constexpr float TUNNEL_DOOR_OPEN_MM      = 250.0f;
@@ -206,7 +206,7 @@ constexpr float TUNNEL_DONE_MM           = 200.0f;
 constexpr float MAX_VALID_DIST_MM        = 2000.0f;
 constexpr float MIN_VALID_DIST_MM        = 20.0f;
 constexpr unsigned long BASE_EXIT_DRIVE_TIMEOUT_MS = 3000;
-constexpr long BASE_EXIT_MIN_DISTANCE_COUNTS = 500;
+constexpr long BASE_EXIT_MIN_DISTANCE_COUNTS = 2000;
 
 float lastValidSide = TARGET_SIDE_MM;
 float lastValidForward = 1000.0f;
@@ -1064,16 +1064,16 @@ void run_mission_step()
   switch (mission_state) {
 
     case MissionState::BaseLineFollow:
-      update_line_following_step(false);  // do not search on lost — line ends at gate
+      update_line_following_step(false);
 
-      // Transition: line is lost AND forward door is detected close ahead
-      if (!line_detected && fwd < BASE_DOOR_CLOSED_MM) {
-        stopMotors();
-        set_mission_state(MissionState::BaseExitWait);
+      // Transition when forward door is close, regardless of line state
+      if (fwd < BASE_DOOR_CLOSED_MM) {
+          stopMotors();
+          set_mission_state(MissionState::BaseExitWait);
       }
-      // Fallback: line is lost AND side wall already visible (gate was already open)
+      // Fallback for already-open gate case
       else if (!line_detected && side < SIDE_WALL_DETECTED_MM) {
-        set_mission_state(MissionState::TunnelWallFollow);
+          set_mission_state(MissionState::TunnelWallFollow);
       }
       break;
 
