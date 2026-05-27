@@ -12,7 +12,7 @@ constexpr uint16_t GYRO_BIAS_SAMPLE_COUNT = 200;
 constexpr unsigned long GYRO_BIAS_SAMPLE_DELAY_MS = 5;
 constexpr float ITG320X_LSB_PER_DPS = 14.375f;
 constexpr float GYRO_Z_DEADBAND_DPS = 0.4f;
-constexpr float TURN_TARGET_DEG = 90.0f;
+constexpr float TURN_TARGET_DEG = 88.0f;//for a 90 degree turn, we target slightly less to account for overshoot
 
 constexpr uint8_t MOTOR_LEFT = 1;
 constexpr uint8_t MOTOR_RIGHT = 2;
