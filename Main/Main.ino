@@ -63,21 +63,6 @@ constexpr int RFID_RESET_PIN = -1;
 
 }
 
-// Shared declarations for the tunnel sequence
-enum class MissionPhase { BaseToGate, Tunnel, Arena };
-enum class TunnelState {
-  WaitAtBaseGate,
-  DrivingIntoTunnel,
-  WallFollow,
-  WaitAtExitGate,
-  PassingExitGate
-};
-
-constexpr float GATE_STOP_MM = 100.0f;
-
-extern MissionPhase mission_phase;
-float forward_distance_mm();
-
 // =====================================================
 // State
 // =====================================================
@@ -86,6 +71,7 @@ enum class FollowState {
   Idle,
   FollowLine,
   CrossIntersection,
+  LineGap,
   LostLine,
 };
 
@@ -106,7 +92,6 @@ enum class StartupCalState {
   Ready
 };
 
-
 StartupCalState startup_cal_state = StartupCalState::CalibratingIR;
 
 FollowState follow_state = FollowState::Idle;
@@ -124,6 +109,8 @@ constexpr unsigned long CONTROL_INTERVAL_MS = 30;
 constexpr unsigned long LINE_STATUS_INTERVAL_MS = 250;
 constexpr unsigned long INTERSECTION_CROSS_MS = 500;
 constexpr unsigned long RFID_SCAN_COOLDOWN_MS = 1500;
+constexpr unsigned long LINE_GAP_FORWARD_MS = 500;
+constexpr int16_t LINE_GAP_SPEED = 220;
 
 constexpr unsigned long IMU_STILL_WAIT_MS = 3000;
 unsigned long imu_still_start_ms = 0;
@@ -368,7 +355,9 @@ void setup()
 
   setupRFID();
   setupServos();
-  setup_tunnel();
+
+  //messenger.onMessage(onMessage);
+  //messenger.begin(WIFI_SSID, WIFI_PASSWORD, BROKER_HOST, BROKER_PORT, GROUP_ID, BoardId);
 
   reset_calibration();
 
@@ -389,6 +378,28 @@ void loop()
 {
   serviceServoPulses();
   update_turn_angle();
+
+  if (Serial.available() > 0) {
+    const char command = static_cast<char>(Serial.read());
+
+    if (command == '0') {
+      running = !running;
+
+      if (!running) {
+        stopMotors();
+        Serial.println("running=0");
+      } else {
+        Serial.println("running=1");
+      }
+
+      return;
+    }
+
+    else if (command == '3') {
+      RunTest3();
+      return;
+    }
+  }
 
   int OffButtonPressed = digitalRead(OffButtonPin);
   int RevButtonPressed = digitalRead(RevButtonPin);
@@ -469,6 +480,122 @@ void loop()
     Green();
     stopMotors();
     delay(500);
+    setMotors(-BASE_SPEED, -BASE_SPEED);
+    return;
+  }
+
+  Red();
+
+  // No line-following logic here.
+  // Robot waits for command '3' to run RunTest3.
+  stopMotors();
+
+  if (now_ms - last_line_status_ms >= LINE_STATUS_INTERVAL_MS) {
+    last_line_status_ms = now_ms;
+    Serial.println("idle_waiting_for_command_3");
+  }
+}
+
+
+/*void loop()
+{
+  serviceServoPulses();
+  update_turn_angle();
+
+  if (Serial.available() > 0) {
+    const char command = static_cast<char>(Serial.read());
+
+    if (command == '0') {
+      running = !running;
+      return;
+    }
+
+    else if (command == '3') {
+      RunTest3();
+      return;
+    }
+  }
+
+  int OffButtonPressed = digitalRead(OffButtonPin);
+  int RevButtonPressed = digitalRead(RevButtonPin);
+
+  Reviving = false;
+
+  if (OffButtonPressed == LOW && previousOffButtonPressed != LOW) {
+    running = !running;
+    delay(50);
+  } else if (RevButtonPressed == LOW) {
+    Reviving = true;
+    delay(50);
+  }
+
+  previousOffButtonPressed = OffButtonPressed;
+
+  read_rc_discharge_times();
+
+  const unsigned long now_ms = millis();
+
+  if (startup_cal_state != StartupCalState::Ready) {
+    stopMotors();
+
+    if (startup_cal_state == StartupCalState::CalibratingIR) {
+      Blue();
+      update_calibration();
+
+      if (now_ms - calibration_start_ms >= CALIBRATION_TIME_MS) {
+        print_calibration();
+
+        startup_cal_state = StartupCalState::WaitingForStillIMU;
+        imu_still_start_ms = millis();
+
+        Serial.println("IR calibration complete.");
+        Serial.println("YELLOW LED: place robot flat and keep it still for IMU calibration.");
+      }
+
+      return;
+    }
+
+    if (startup_cal_state == StartupCalState::WaitingForStillIMU) {
+      Yellow();
+
+      if (now_ms - imu_still_start_ms >= IMU_STILL_WAIT_MS) {
+        startup_cal_state = StartupCalState::CalibratingIMU;
+        Serial.println("Starting IMU gyro calibration. Keep robot still.");
+      }
+
+      return;
+    }
+
+    if (startup_cal_state == StartupCalState::CalibratingIMU) {
+      Yellow();
+
+      calibrate_gyro_z_bias();
+
+      startup_cal_state = StartupCalState::Ready;
+      calibration_done = true;
+
+      Serial.println("All calibration complete. Robot ready.");
+
+      return;
+    }
+  }
+
+  if (!running) {
+    run_enabled = false;
+    Flash(previousStateRed);
+    previousStateRed++;
+    stopMotors();
+    delay(25);
+    return;
+  }
+
+  run_enabled = true;
+
+  if (Reviving) {
+    Green();
+    stopMotors();
+    delay(500);
+    setMotors(-BASE_SPEED, -BASE_SPEED);
     return;
   }
 
@@ -480,12 +607,7 @@ void loop()
 
   if (now_ms - last_control_ms >= CONTROL_INTERVAL_MS) {
     last_control_ms = now_ms;
-    
-    if (mission_phase == MissionPhase::Tunnel) {
-        run_tunnel_step();            // new: wall-follow state machine
-    } else {
-        update_line_following();      // base-to-gate AND arena both use this
-    }
+    update_line_following();
   }
 
   if (now_ms - last_line_status_ms >= LINE_STATUS_INTERVAL_MS) {
