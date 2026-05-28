@@ -86,18 +86,6 @@ constexpr uint8_t RFID_I2C_ADDRESS = 0x28;
 constexpr int RFID_RESET_PIN = -1;
 }
 
-/*byte arenaMap = {{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
-                   {1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 1},
-                   {1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 1},
-                   {1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 1},
-                   {1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 1},
-                   {1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 1},
-                   [1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 1},
-                   {1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 1},
-                   {1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 1},
-                   {1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 1},
-                   {1, 4, 1, 1, 1, 1, 1, 1, 0, 5, 1}};*/
-
 // =====================================================
 // State
 // =====================================================
@@ -119,15 +107,6 @@ enum class JunctionType {
   Lost
 };
 
-JunctionType last_junction_type = JunctionType::None;
-unsigned long last_junction_detect_ms = 0;
-
-// Forward declarations for Arduino .ino auto-prototype safety
-const char* junctionTypeName(JunctionType type);
-bool sensor_active(uint8_t index);
-uint8_t count_active_range(uint8_t start_index, uint8_t end_index);
-JunctionType detect_junction_type();
-
 enum class StartupCalState {
   CalibratingIR,
   WaitingForStillIMU,
@@ -137,8 +116,8 @@ enum class StartupCalState {
 
 StartupCalState startup_cal_state = StartupCalState::CalibratingIR;
 
-constexpr unsigned long IMU_STILL_WAIT_MS = 3000;
-unsigned long imu_still_start_ms = 0;
+JunctionType last_junction_type = JunctionType::None;
+unsigned long last_junction_detect_ms = 0;
 
 // =====================================================
 // Timing constants
@@ -149,14 +128,15 @@ constexpr unsigned long CALIBRATION_TIME_MS = 5000;
 constexpr unsigned long CONTROL_INTERVAL_MS = 30;
 constexpr unsigned long LINE_STATUS_INTERVAL_MS = 250;
 constexpr unsigned long INTERSECTION_CROSS_MS = 500;
-constexpr unsigned long LOST_FORWARD_MS = 250;
 constexpr unsigned long RFID_SCAN_COOLDOWN_MS = 1500;
 
+constexpr unsigned long IMU_STILL_WAIT_MS = 3000;
+unsigned long imu_still_start_ms = 0;
+
 // =====================================================
-// IMU section - DFRobot SEN0140 / ITG320x gyro support
+// IMU constants
 // =====================================================
 
-constexpr unsigned long IMU_PRINT_INTERVAL_MS = 250;
 constexpr unsigned long TURN_TIMEOUT_MS = 5000;
 constexpr uint16_t GYRO_BIAS_SAMPLE_COUNT = 200;
 constexpr unsigned long GYRO_BIAS_SAMPLE_DELAY_MS = 5;
@@ -164,8 +144,15 @@ constexpr unsigned long GYRO_BIAS_SAMPLE_DELAY_MS = 5;
 constexpr float ITG320X_LSB_PER_DPS = 14.375f;
 constexpr float GYRO_Z_DEADBAND_DPS = 0.4f;
 
-constexpr float TURN_90_TARGET_DEG = 90.0f;
-constexpr float TURN_180_TARGET_DEG = 180.0f;
+constexpr float TURN_90_TARGET_DEG = 100.0f;
+constexpr float TURN_180_TARGET_DEG = 190.0f;
+
+// This prevents the robot from instantly detecting the line it came from.
+constexpr float TURN_90_IGNORE_LINE_UNTIL_DEG = 25.0f;
+constexpr float TURN_180_IGNORE_LINE_UNTIL_DEG = 120.0f;
+
+constexpr uint16_t TURN_LINE_DETECT_THRESHOLD = 600;
+constexpr uint16_t TURN_CENTER_DETECT_THRESHOLD = 550;
 
 constexpr uint8_t ADXL345_ADDRESS = 0x53;
 constexpr uint8_t ADXL345_DEVID = 0x00;
@@ -211,8 +198,6 @@ float gyro_z_bias_dps = 0.0f;
 float turn_angle_deg = 0.0f;
 
 unsigned long last_gyro_update_us = 0;
-unsigned long turn_start_ms = 0;
-unsigned long last_imu_print_ms = 0;
 
 struct Axis3 {
   int16_t x;
@@ -227,8 +212,16 @@ struct Axis3 {
 constexpr uint8_t SENSOR_COUNT = 9;
 constexpr uint16_t LINE_POSITION_SCALE = 1000;
 constexpr int32_t LINE_CENTER = ((SENSOR_COUNT - 1) * LINE_POSITION_SCALE) / 2;
+
 constexpr uint16_t INTERSECTION_THRESHOLD = 800;
 constexpr uint8_t INTERSECTION_SENSOR_COUNT = 7;
+
+constexpr unsigned long LOST_REVERSE_MS = 250;
+constexpr unsigned long LOST_GENTLE_SEARCH_MS = 900;
+
+constexpr int16_t LOST_REVERSE_SPEED = 160;
+constexpr int16_t LOST_GENTLE_TURN_SPEED = 180;
+constexpr int16_t LOST_HARD_TURN_SPEED = 260;
 
 const uint8_t sensor_pins[SENSOR_COUNT] = {2, 3, 4, 5, 8, 9, 10, 11, 12};
 
@@ -245,6 +238,7 @@ unsigned long last_control_ms = 0;
 unsigned long last_line_status_ms = 0;
 
 int32_t last_error = 0;
+int8_t last_line_side = 0;
 
 bool calibration_done = false;
 bool line_detected = false;
@@ -261,12 +255,9 @@ const uint8_t MOTOR_RIGHT = 2;
 const uint8_t MOTOR_AUX   = 3;
 
 const double MOTOR_RATIO = 1.44 / 1.4681;
-const long TURN_90_COUNTS = 1540;
-const long TURN_180_COUNTS = 3070;
 
-const int16_t TURN_SPEED = 250;
 constexpr int16_t BASE_SPEED = 250;
-constexpr int16_t LOST_SEARCH_SPEED = 200;
+constexpr int16_t TURN_SPEED = 230;
 
 const int16_t MAX_SPEED_R = 800;
 const int16_t MAX_SPEED_L = 800;
@@ -322,7 +313,6 @@ int previousOffButtonPressed = 1;
 // =====================================================
 
 constexpr uint8_t RFID_ADDR = robot_config::RFID_I2C_ADDRESS;
-
 MFRC522_I2C rfid(RFID_ADDR, robot_config::RFID_RESET_PIN, &Wire1);
 
 // =====================================================
@@ -343,10 +333,25 @@ constexpr unsigned long SERVO_PERIOD_US = robot_config::SEED_SERVO_PERIOD_US;
 
 int upper_pulse_us = 1500;
 int lower_pulse_us = 1500;
-
 int seeds = 5;
 
 unsigned long last_servo_frame_us = 0;
+
+// =====================================================
+// Forward declarations
+// =====================================================
+
+void serviceServoPulses();
+void read_rc_discharge_times();
+void update_calibrated_values();
+uint16_t target_value_at(uint8_t sensor_index);
+uint16_t line_peak();
+bool blackLineDetectedDuringTurn();
+void reset_turn_angle();
+void update_turn_angle();
+void set_follow_state(FollowState next_state);
+void stopMotors();
+void setMotors(int16_t leftSpeed, int16_t rightSpeed);
 
 // =====================================================
 // Helper functions
@@ -401,19 +406,10 @@ void printEncoders()
   const long left = getLeftEncoder();
   const long right = getRightEncoder();
 
-  Serial.print("Left encoder: ");
+  Serial.print(" Left encoder=");
   Serial.print(left);
-  Serial.print(" | Right encoder: ");
-  Serial.println(right);
-
-  Serial.print("Error: ");
-  Serial.println(left - right);
-
-  Serial.print("Estimated distance traveled (L): ");
-  Serial.println((left * M_PI * wheel_diameter) / (12 * 100));
-
-  Serial.print("Estimated distance traveled (R): ");
-  Serial.println((right * M_PI * wheel_diameter) / (12 * 100));
+  Serial.print(" Right encoder=");
+  Serial.print(right);
 }
 
 // =====================================================
@@ -456,8 +452,6 @@ void configureMotor(uint8_t motor)
 
 void beginMotoron()
 {
-  checkpoint("Starting Wire1");
-
   Wire1.begin();
   Wire1.setClock(100000);
 
@@ -495,21 +489,6 @@ void drive_forward()
   );
 }
 
-void search_for_line()
-{
-  if (last_error < 0) {
-    setMotors(
-      -LEFT_FORWARD_SIGN * LOST_SEARCH_SPEED,
-      RIGHT_FORWARD_SIGN * LOST_SEARCH_SPEED
-    );
-  } else {
-    setMotors(
-      LEFT_FORWARD_SIGN * LOST_SEARCH_SPEED,
-      -RIGHT_FORWARD_SIGN * LOST_SEARCH_SPEED
-    );
-  }
-}
-
 void follow_line(int32_t error)
 {
   const int16_t correction = static_cast<int16_t>(LINE_KP * static_cast<float>(error));
@@ -520,442 +499,305 @@ void follow_line(int32_t error)
   setMotors(left_speed, right_speed);
 }
 
-// Forward declaration because centreAfterRFID uses it.
-void serviceServoPulses();
-
-void centreAfterRFID()
+void recover_lost_line()
 {
-  int L_base = getLeftEncoder();
-  int R_base = getRightEncoder();
+  const unsigned long lost_time_ms = millis() - state_start_ms;
 
-  while ((getLeftEncoder() - L_base < 250) || (getRightEncoder() - R_base < 250)) {
-    setMotors(BASE_SPEED, BASE_SPEED);
-    serviceServoPulses();
+  int8_t search_direction = last_error < 0 ? -1 : 1;
+
+  if (last_line_side != 0) {
+    search_direction = last_line_side;
   }
 
-  stopMotors();
-}
-
-void centreAfterIR()
-{
-  int L_base = getLeftEncoder();
-  int R_base = getRightEncoder();
-
-  while ((getLeftEncoder() - L_base < 300) || (getRightEncoder() - R_base < 300)) {
-    setMotors(BASE_SPEED, BASE_SPEED);
-    serviceServoPulses();
-  }
-
-  stopMotors();
-}
-
-// =====================================================
-// IMU-based turning functions
-// =====================================================
-
-bool imuTurnDegrees(float target_degrees, int8_t direction)
-{
-  if (!motoron_ready) {
-    Serial.println("turn_error=motoron_not_ready");
-    return false;
-  }
-
-  if (!itg320x_ready) {
-    Serial.println("turn_error=gyro_not_ready");
-    return false;
-  }
-
-  direction = direction >= 0 ? 1 : -1;
-
-  reset_turn_angle();
-
-  const unsigned long start_ms = millis();
-
-  Serial.print("imu_turn_start direction=");
-  Serial.print(direction > 0 ? "left" : "right");
-  Serial.print(" target=");
-  Serial.println(target_degrees, 1);
-
-  while (fabsf(turn_angle_deg) < target_degrees) {
-    serviceServoPulses();
-    update_turn_angle();
-
-    if (direction > 0) {
-      setMotors(-LEFT_FORWARD_SIGN * TURN_SPEED,
-                 RIGHT_FORWARD_SIGN * TURN_SPEED);
-    } else {
-      setMotors( LEFT_FORWARD_SIGN * TURN_SPEED,
-                -RIGHT_FORWARD_SIGN * TURN_SPEED);
-    }
-
-    if (millis() - start_ms >= TURN_TIMEOUT_MS) {
-      Serial.print("turn_timeout angle=");
-      Serial.println(turn_angle_deg, 1);
-      stopMotors();
-      return false;
-    }
-  }
-
-  stopMotors();
-
-  Serial.print("imu_turn_done angle=");
-  Serial.println(turn_angle_deg, 1);
-
-  delay(100);
-
-  return true;
-}
-
-void turnLeft90()
-{
-  imuTurnDegrees(TURN_90_TARGET_DEG, 1);
-}
-
-void turnRight90()
-{
-  imuTurnDegrees(TURN_90_TARGET_DEG, -1);
-}
-
-void turnLeft180()
-{
-  imuTurnDegrees(TURN_180_TARGET_DEG, 1);
-}
-
-void turnRight180()
-{
-  imuTurnDegrees(TURN_180_TARGET_DEG, -1);
-}
-
-// =====================================================
-// Line-detecting turn functions
-// =====================================================
-
-const long TURN_360_COUNTS = TURN_180_COUNTS * 2L;
-
-constexpr int32_t TURN_LINE_CENTER_TOLERANCE = 350;
-constexpr uint16_t TURN_LINE_MIN_PEAK = robot_config::QTR_LINE_DETECT_ON_THRESHOLD;
-constexpr uint8_t TURN_CENTER_STABLE_SAMPLES = 4;
-constexpr unsigned long TURN_WITH_LINE_TIMEOUT_MS = 8000;
-
-// Ignore the starting line for part of the turn.
-// This prevents the robot from instantly detecting the line it is already on.
-const long TURN_90_ACCEPT_AFTER_COUNTS = TURN_90_COUNTS / 2;
-const long TURN_180_ACCEPT_AFTER_COUNTS = TURN_180_COUNTS - (TURN_90_COUNTS / 2);
-
-long averageTurnMovementCounts(long left_base, long right_base)
-{
-  const long left_delta = abs(getLeftEncoder() - left_base);
-  const long right_delta = abs(getRightEncoder() - right_base);
-
-  return (left_delta + right_delta) / 2;
-}
-
-bool lineCenteredForTurn()
-{
-  const uint16_t peak = line_peak();
-
-  if (peak < TURN_LINE_MIN_PEAK) {
-    return false;
-  }
-
-  const int32_t position = estimate_line_position();
-
-  if (position < 0) {
-    return false;
-  }
-
-  const int32_t error = position - LINE_CENTER;
-
-  if (abs(error) > TURN_LINE_CENTER_TOLERANCE) {
-    return false;
-  }
-
-  const uint16_t center_value = target_value_at(4);
-
-  uint16_t max_other_value = 0;
-
-  for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
-    if (i == 4) {
-      continue;
-    }
-
-    const uint16_t value = target_value_at(i);
-
-    if (value > max_other_value) {
-      max_other_value = value;
-    }
-  }
-
-  // The middle sensor should be the strongest, or effectively tied with the strongest.
-  // The small tolerance avoids rejecting a good line because of sensor noise.
-  return center_value + 50 >= max_other_value;
-}
-
-bool turnUntilCenteredLine(int8_t direction, long accept_after_counts)
-{
-  direction = direction >= 0 ? 1 : -1;
-
-  const long left_base = getLeftEncoder();
-  const long right_base = getRightEncoder();
-
-  const unsigned long start_ms = millis();
-
-  uint8_t centered_samples = 0;
-
-  Serial.print("turn_with_lines_start=");
-  Serial.println(direction > 0 ? "left" : "right");
-
-  while (averageTurnMovementCounts(left_base, right_base) < TURN_360_COUNTS) {
-    serviceServoPulses();
-
-    if (direction > 0) {
-      setMotors(-TURN_SPEED, TURN_SPEED);
-    } else {
-      setMotors(TURN_SPEED, -TURN_SPEED);
-    }
-
-    read_rc_discharge_times();
-    update_calibrated_values();
-
-    const long moved_counts = averageTurnMovementCounts(left_base, right_base);
-
-    if (moved_counts >= accept_after_counts && lineCenteredForTurn()) {
-      centered_samples++;
-    } else {
-      centered_samples = 0;
-    }
-
-    if (centered_samples >= TURN_CENTER_STABLE_SAMPLES) {
-      stopMotors();
-
-      last_error = 0;
-      line_detected = true;
-      set_follow_state(FollowState::FollowLine);
-
-      Serial.println("turn_with_lines_result=line_centered");
-
-      // Hand control back to the normal line-following correction.
-      // If you later rename follow_line() to follow_line_pid(), call that here instead.
-      follow_line(0);
-
-      return true;
-    }
-
-    if (millis() - start_ms >= TURN_WITH_LINE_TIMEOUT_MS) {
-      break;
-    }
-  }
-
-  stopMotors();
-
-  line_detected = false;
-  set_follow_state(FollowState::LostLine);
-
-  Serial.println("turn_with_lines_result=line_not_found_lost");
-
-  return false;
-}
-
-void turnLeft90WithLines()
-{
-  turnUntilCenteredLine(1, TURN_90_ACCEPT_AFTER_COUNTS);
-}
-
-void turnRight90WithLines()
-{
-  turnUntilCenteredLine(-1, TURN_90_ACCEPT_AFTER_COUNTS);
-}
-
-void turnLeft180WithLines()
-{
-  turnUntilCenteredLine(1, TURN_180_ACCEPT_AFTER_COUNTS);
-}
-
-void turnRight180WithLines()
-{
-  turnUntilCenteredLine(-1, TURN_180_ACCEPT_AFTER_COUNTS);
-}
-
-// =====================================================
-// LED functions
-// =====================================================
-
-void Flash(int previousStateRed)
-{
-  if (previousStateRed % 20 <= 9) {
-    digitalWrite(redPin, HIGH);
-    digitalWrite(greenPin, LOW);
-    digitalWrite(bluePin, LOW);
-  } else {
-    digitalWrite(redPin, LOW);
-    digitalWrite(greenPin, LOW);
-    digitalWrite(bluePin, LOW);
-  }
-}
-
-void Green()
-{
-  digitalWrite(redPin, LOW);
-  digitalWrite(greenPin, HIGH);
-  digitalWrite(bluePin, LOW);
-}
-
-void Red()
-{
-  digitalWrite(redPin, HIGH);
-  digitalWrite(greenPin, LOW);
-  digitalWrite(bluePin, LOW);
-}
-
-void Yellow()
-{
-  digitalWrite(redPin, HIGH);
-  digitalWrite(greenPin, HIGH);
-  digitalWrite(bluePin, LOW);
-}
-
-void Blue()
-{
-  digitalWrite(redPin, LOW);
-  digitalWrite(greenPin, LOW);
-  digitalWrite(bluePin, HIGH);
-}
-
-// =====================================================
-// RFID functions
-// =====================================================
-
-bool rfid_firmware_version_valid(byte version)
-{
-  return version == 0x15 ||
-         version == 0x90 ||
-         version == 0x91 ||
-         version == 0x92 ||
-         version == 0xB2;
-}
-
-void print_hex2(byte value)
-{
-  if (value < 0x10) {
-    Serial.print('0');
-  }
-
-  Serial.print(value, HEX);
-}
-
-void init_reader_without_soft_reset()
-{
-  rfid.PCD_WriteRegister(rfid.TModeReg, 0x80);
-  rfid.PCD_WriteRegister(rfid.TPrescalerReg, 0xA9);
-  rfid.PCD_WriteRegister(rfid.TReloadRegH, 0x03);
-  rfid.PCD_WriteRegister(rfid.TReloadRegL, 0xE8);
-  rfid.PCD_WriteRegister(rfid.TxASKReg, 0x40);
-  rfid.PCD_WriteRegister(rfid.ModeReg, 0x3D);
-  rfid.PCD_AntennaOn();
-}
-
-bool i2c_device_present(uint8_t address)
-{
-  Wire1.beginTransmission(address);
-  return Wire1.endTransmission() == 0;
-}
-
-// =====================================================
-// Servo functions
-// =====================================================
-
-int angleToPulseUs(int angle)
-{
-  angle = constrain(angle, 0, 180);
-  return map(angle, 0, 180, SERVO_MIN_PULSE_US, SERVO_MAX_PULSE_US);
-}
-
-void serviceServoPulses()
-{
-  const unsigned long now = micros();
-
-  if (now - last_servo_frame_us < SERVO_PERIOD_US) {
+  if (lost_time_ms < LOST_REVERSE_MS) {
+    setMotors(
+      -LEFT_FORWARD_SIGN * LOST_REVERSE_SPEED,
+      -RIGHT_FORWARD_SIGN * LOST_REVERSE_SPEED
+    );
     return;
   }
 
-  last_servo_frame_us = now;
+  if (lost_time_ms < LOST_REVERSE_MS + LOST_GENTLE_SEARCH_MS) {
+    if (search_direction < 0) {
+      setMotors(-LOST_GENTLE_TURN_SPEED, LOST_GENTLE_TURN_SPEED);
+    } else {
+      setMotors(LOST_GENTLE_TURN_SPEED, -LOST_GENTLE_TURN_SPEED);
+    }
+    return;
+  }
 
-  digitalWrite(SERVO1_PIN, HIGH);
-  delayMicroseconds(upper_pulse_us);
-  digitalWrite(SERVO1_PIN, LOW);
-
-  digitalWrite(SERVO2_PIN, HIGH);
-  delayMicroseconds(lower_pulse_us);
-  digitalWrite(SERVO2_PIN, LOW);
-}
-
-void waitWithServo(unsigned long ms)
-{
-  const unsigned long start = millis();
-
-  while (millis() - start < ms) {
-    serviceServoPulses();
-    delay(1);
+  if (search_direction < 0) {
+    setMotors(-LOST_HARD_TURN_SPEED, LOST_HARD_TURN_SPEED);
+  } else {
+    setMotors(LOST_HARD_TURN_SPEED, -LOST_HARD_TURN_SPEED);
   }
 }
 
-void writeUpperServo(int angle)
+// =====================================================
+// Line sensor functions
+// =====================================================
+
+void read_rc_discharge_times()
 {
-  upper_pulse_us = angleToPulseUs(angle);
+  for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
+    pinMode(sensor_pins[i], OUTPUT);
+    digitalWrite(sensor_pins[i], HIGH);
+  }
+
+  delayMicroseconds(15);
+
+  for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
+    pinMode(sensor_pins[i], INPUT);
+    raw_values[i] = robot_config::QTR_RC_TIMEOUT_US;
+  }
+
+  const unsigned long start_time_us = micros();
+
+  while (micros() - start_time_us < robot_config::QTR_RC_TIMEOUT_US) {
+    const uint16_t elapsed_us = static_cast<uint16_t>(micros() - start_time_us);
+
+    for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
+      if (raw_values[i] == robot_config::QTR_RC_TIMEOUT_US &&
+          digitalRead(sensor_pins[i]) == LOW) {
+        raw_values[i] = elapsed_us;
+      }
+    }
+  }
 }
 
-void writeLowerServo(int angle)
+void reset_calibration()
 {
-  lower_pulse_us = angleToPulseUs(angle);
+  for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
+    min_values[i] = robot_config::QTR_RC_TIMEOUT_US;
+    max_values[i] = 0;
+  }
 }
 
-void closeBothGates()
+void update_calibration()
 {
-  writeUpperServo(UPPER_CLOSED);
-  writeLowerServo(LOWER_CLOSED);
+  for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
+    if (raw_values[i] < min_values[i]) {
+      min_values[i] = raw_values[i];
+    }
+
+    if (raw_values[i] > max_values[i]) {
+      max_values[i] = raw_values[i];
+    }
+  }
 }
 
-void dispenseOne()
+void update_calibrated_values()
 {
-  Serial.println(F("Dispense cycle..."));
+  for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
+    const uint16_t range = max_values[i] - min_values[i];
 
-  writeUpperServo(UPPER_OPEN);
-  waitWithServo(robot_config::SEED_UPPER_OPEN_MS);
+    uint16_t value = 0;
 
-  writeUpperServo(UPPER_CLOSED);
-  waitWithServo(robot_config::SEED_UPPER_CLOSE_MS);
+    if (range > 0 && raw_values[i] > min_values[i]) {
+      value = static_cast<uint16_t>(
+        min<uint32_t>(
+          1000,
+          (static_cast<uint32_t>(raw_values[i] - min_values[i]) * 1000) / range
+        )
+      );
+    }
 
-  writeLowerServo(LOWER_OPEN);
-  waitWithServo(robot_config::SEED_LOWER_OPEN_MS);
+    calibrated_values[i] = robot_config::QTR_LINE_IS_HIGH_RAW ? value : 1000 - value;
+  }
+}
 
-  writeLowerServo(LOWER_CLOSED);
-  waitWithServo(robot_config::SEED_LOWER_CLOSE_MS);
+uint16_t target_value_at(uint8_t sensor_index)
+{
+  return robot_config::QTR_FOLLOW_BLACK_LINE
+           ? calibrated_values[sensor_index]
+           : 1000 - calibrated_values[sensor_index];
+}
 
-  Serial.println(F("Done."));
+uint16_t line_peak()
+{
+  uint16_t peak = 0;
+
+  for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
+    const uint16_t value = target_value_at(i);
+
+    if (value > peak) {
+      peak = value;
+    }
+  }
+
+  return peak;
+}
+
+bool update_line_found()
+{
+  const uint16_t peak = line_peak();
+
+  if (line_detected) {
+    line_detected = peak >= robot_config::QTR_LINE_DETECT_OFF_THRESHOLD;
+  } else {
+    line_detected = peak >= robot_config::QTR_LINE_DETECT_ON_THRESHOLD;
+  }
+
+  return line_detected;
+}
+
+void update_last_line_side()
+{
+  const uint16_t left_strength =
+    target_value_at(0) + target_value_at(1) + target_value_at(2);
+
+  const uint16_t center_strength =
+    target_value_at(3) + target_value_at(4) + target_value_at(5);
+
+  const uint16_t right_strength =
+    target_value_at(6) + target_value_at(7) + target_value_at(8);
+
+  if (left_strength > center_strength && left_strength > right_strength) {
+    last_line_side = -1;
+  } else if (right_strength > center_strength && right_strength > left_strength) {
+    last_line_side = 1;
+  } else if (center_strength > 0) {
+    last_line_side = 0;
+  }
+}
+
+bool blackLineDetectedDuringTurn()
+{
+  read_rc_discharge_times();
+  update_calibrated_values();
+
+  const uint16_t peak = line_peak();
+
+  const uint16_t center_peak =
+    max(target_value_at(3), max(target_value_at(4), target_value_at(5)));
+
+  return peak >= TURN_LINE_DETECT_THRESHOLD ||
+         center_peak >= TURN_CENTER_DETECT_THRESHOLD;
+}
+
+bool intersection_detected()
+{
+  uint8_t high_count = 0;
+
+  for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
+    if (target_value_at(i) >= INTERSECTION_THRESHOLD) {
+      ++high_count;
+    }
+  }
+
+  return high_count >= INTERSECTION_SENSOR_COUNT;
+}
+
+bool sensor_active(uint8_t index)
+{
+  return target_value_at(index) >= INTERSECTION_THRESHOLD;
+}
+
+uint8_t count_active_range(uint8_t start_index, uint8_t end_index)
+{
+  uint8_t count = 0;
+
+  for (uint8_t i = start_index; i <= end_index; ++i) {
+    if (sensor_active(i)) {
+      count++;
+    }
+  }
+
+  return count;
+}
+
+JunctionType detect_junction_type()
+{
+  const uint8_t left_count = count_active_range(0, 2);
+  const uint8_t center_count = count_active_range(3, 5);
+  const uint8_t right_count = count_active_range(6, 8);
+
+  const bool left_active = left_count >= 2;
+  const bool center_active = center_count >= 1;
+  const bool right_active = right_count >= 2;
+
+  const uint8_t total_active = left_count + center_count + right_count;
+
+  if (total_active == 0) {
+    return JunctionType::Lost;
+  }
+
+  if (left_active && center_active && right_active) {
+    if (total_active >= 7) {
+      return JunctionType::WideIntersection;
+    }
+    return JunctionType::TIntersection;
+  }
+
+  if (left_active && center_active && !right_active) {
+    return JunctionType::LeftTurn;
+  }
+
+  if (!left_active && center_active && right_active) {
+    return JunctionType::RightTurn;
+  }
+
+  if (!left_active && center_active && !right_active) {
+    return JunctionType::Straight;
+  }
+
+  return JunctionType::None;
+}
+
+const char* junctionTypeName(JunctionType type)
+{
+  switch (type) {
+    case JunctionType::None:
+      return "none";
+    case JunctionType::Straight:
+      return "straight";
+    case JunctionType::LeftTurn:
+      return "left_turn";
+    case JunctionType::RightTurn:
+      return "right_turn";
+    case JunctionType::TIntersection:
+      return "t_intersection";
+    case JunctionType::WideIntersection:
+      return "wide_intersection";
+    case JunctionType::Lost:
+      return "lost";
+    default:
+      return "unknown";
+  }
+}
+
+int32_t estimate_line_position()
+{
+  uint32_t weighted_sum = 0;
+  uint32_t sum = 0;
+
+  for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
+    const uint16_t value = target_value_at(i);
+
+    weighted_sum += static_cast<uint32_t>(value) * i * LINE_POSITION_SCALE;
+    sum += value;
+  }
+
+  if (sum == 0) {
+    return -1;
+  }
+
+  return static_cast<int32_t>(weighted_sum / sum);
+}
+
+void set_follow_state(FollowState next_state)
+{
+  if (follow_state == next_state) {
+    return;
+  }
+
+  follow_state = next_state;
+  state_start_ms = millis();
 }
 
 // =====================================================
 // IMU helper functions
 // =====================================================
-
-/*void processIMUSerialCommands()
-{
-  while (Serial.available() > 0) {
-    const char command = static_cast<char>(Serial.read());
-
-    if (command == 'c' || command == 'C') {
-      stopMotors();
-      calibrate_gyro_z_bias();
-    } else if (command == 'z' || command == 'Z') {
-      reset_turn_angle();
-      Serial.println("turn_angle_reset=1");
-    } else if (command == 'l' || command == 'L') {
-      turnLeft90();
-    } else if (command == 'r' || command == 'R') {
-      turnRight90();
-    }
-  }
-}*/
 
 bool imu_write_register(TwoWire& bus, uint8_t address, uint8_t reg, uint8_t value)
 {
@@ -985,7 +827,6 @@ bool imu_read_registers(
     while (bus.available() > 0) {
       bus.read();
     }
-
     return false;
   }
 
@@ -1005,15 +846,6 @@ bool imu_probe_address(TwoWire& bus, uint8_t address)
 {
   bus.beginTransmission(address);
   return bus.endTransmission() == 0;
-}
-
-void imu_print_hex_byte(uint8_t value)
-{
-  if (value < 0x10) {
-    Serial.print('0');
-  }
-
-  Serial.print(value, HEX);
 }
 
 uint8_t imu_count_expected_devices(TwoWire& bus)
@@ -1036,6 +868,15 @@ uint8_t imu_count_expected_devices(TwoWire& bus)
   }
 
   return count;
+}
+
+void imu_print_hex_byte(uint8_t value)
+{
+  if (value < 0x10) {
+    Serial.print('0');
+  }
+
+  Serial.print(value, HEX);
 }
 
 void select_best_imu_i2c_bus()
@@ -1227,7 +1068,8 @@ void update_turn_angle()
     return;
   }
 
-  const float dt_s = static_cast<float>(now_us - last_gyro_update_us) / 1000000.0f;
+  const float dt_s =
+    static_cast<float>(now_us - last_gyro_update_us) / 1000000.0f;
 
   last_gyro_update_us = now_us;
 
@@ -1272,7 +1114,6 @@ void beginIMU()
   Wire.begin();
   Wire.setClock(100000);
 
-  // Wire1 is already used by Motoron/RFID in your code, but this makes sure it is active.
   Wire1.begin();
   Wire1.setClock(100000);
 
@@ -1298,10 +1139,6 @@ void beginIMU()
   Serial.print(hmc5883l_ready ? 'M' : '-');
   Serial.print(bmp280_ready ? 'B' : '-');
   Serial.println();
-
-  if (!adxl345_ready && !itg320x_ready && !hmc5883l_ready && !bmp280_ready) {
-    Serial.println("No IMU devices found. Check VCC, GND, SDA/SCL and common ground.");
-  }
 }
 
 void printIMUStatus()
@@ -1328,7 +1165,283 @@ void printIMUStatus()
 }
 
 // =====================================================
-// Line-following functions
+// Turning functions
+// =====================================================
+
+bool turnUntilLineOrAngle(float max_degrees, int8_t direction, float ignore_line_until_deg)
+{
+  if (!motoron_ready) {
+    Serial.println("turn_error=motoron_not_ready");
+    return false;
+  }
+
+  if (!itg320x_ready) {
+    Serial.println("turn_error=gyro_not_ready");
+    return false;
+  }
+
+  direction = direction >= 0 ? 1 : -1;
+
+  reset_turn_angle();
+
+  const unsigned long start_ms = millis();
+
+  Serial.print("turn_scan_start direction=");
+  Serial.print(direction > 0 ? "left" : "right");
+  Serial.print(" max_deg=");
+  Serial.print(max_degrees, 1);
+  Serial.print(" ignore_until=");
+  Serial.println(ignore_line_until_deg, 1);
+
+  while (fabsf(turn_angle_deg) < max_degrees) {
+    serviceServoPulses();
+    update_turn_angle();
+
+    if (direction > 0) {
+      setMotors(-LEFT_FORWARD_SIGN * TURN_SPEED,
+                 RIGHT_FORWARD_SIGN * TURN_SPEED);
+    } else {
+      setMotors( LEFT_FORWARD_SIGN * TURN_SPEED,
+                -RIGHT_FORWARD_SIGN * TURN_SPEED);
+    }
+
+    const float abs_angle = fabsf(turn_angle_deg);
+
+    if (abs_angle >= ignore_line_until_deg && blackLineDetectedDuringTurn()) {
+      stopMotors();
+
+      read_rc_discharge_times();
+      update_calibrated_values();
+      line_detected = true;
+      last_error = 0;
+
+      set_follow_state(FollowState::FollowLine);
+
+      Serial.print("turn_line_found angle=");
+      Serial.println(turn_angle_deg, 1);
+
+      delay(80);
+      return true;
+    }
+
+    if (millis() - start_ms >= TURN_TIMEOUT_MS) {
+      Serial.print("turn_timeout angle=");
+      Serial.println(turn_angle_deg, 1);
+      stopMotors();
+      set_follow_state(FollowState::LostLine);
+      return false;
+    }
+  }
+
+  stopMotors();
+
+  Serial.print("turn_no_line angle=");
+  Serial.println(turn_angle_deg, 1);
+
+  set_follow_state(FollowState::LostLine);
+  return false;
+}
+
+bool turnLeft90WithLines()
+{
+  return turnUntilLineOrAngle(TURN_90_TARGET_DEG, 1, TURN_90_IGNORE_LINE_UNTIL_DEG);
+}
+
+bool turnRight90WithLines()
+{
+  return turnUntilLineOrAngle(TURN_90_TARGET_DEG, -1, TURN_90_IGNORE_LINE_UNTIL_DEG);
+}
+
+bool turnLeft180WithLines()
+{
+  return turnUntilLineOrAngle(TURN_180_TARGET_DEG, 1, TURN_180_IGNORE_LINE_UNTIL_DEG);
+}
+
+bool turnRight180WithLines()
+{
+  return turnUntilLineOrAngle(TURN_180_TARGET_DEG, -1, TURN_180_IGNORE_LINE_UNTIL_DEG);
+}
+
+void turnLeft90()
+{
+  turnLeft90WithLines();
+}
+
+void turnRight90()
+{
+  turnRight90WithLines();
+}
+
+void turnLeft180()
+{
+  turnLeft180WithLines();
+}
+
+void turnRight180()
+{
+  turnRight180WithLines();
+}
+
+// =====================================================
+// LED functions
+// =====================================================
+
+void Flash(int previousStateRed)
+{
+  if (previousStateRed % 20 <= 9) {
+    digitalWrite(redPin, HIGH);
+    digitalWrite(greenPin, LOW);
+    digitalWrite(bluePin, LOW);
+  } else {
+    digitalWrite(redPin, LOW);
+    digitalWrite(greenPin, LOW);
+    digitalWrite(bluePin, LOW);
+  }
+}
+
+void Green()
+{
+  digitalWrite(redPin, LOW);
+  digitalWrite(greenPin, HIGH);
+  digitalWrite(bluePin, LOW);
+}
+
+void Red()
+{
+  digitalWrite(redPin, HIGH);
+  digitalWrite(greenPin, LOW);
+  digitalWrite(bluePin, LOW);
+}
+
+void Yellow()
+{
+  digitalWrite(redPin, HIGH);
+  digitalWrite(greenPin, HIGH);
+  digitalWrite(bluePin, LOW);
+}
+
+void Blue()
+{
+  digitalWrite(redPin, LOW);
+  digitalWrite(greenPin, LOW);
+  digitalWrite(bluePin, HIGH);
+}
+
+// =====================================================
+// RFID functions
+// =====================================================
+
+bool rfid_firmware_version_valid(byte version)
+{
+  return version == 0x15 ||
+         version == 0x90 ||
+         version == 0x91 ||
+         version == 0x92 ||
+         version == 0xB2;
+}
+
+void print_hex2(byte value)
+{
+  if (value < 0x10) {
+    Serial.print('0');
+  }
+
+  Serial.print(value, HEX);
+}
+
+void init_reader_without_soft_reset()
+{
+  rfid.PCD_WriteRegister(rfid.TModeReg, 0x80);
+  rfid.PCD_WriteRegister(rfid.TPrescalerReg, 0xA9);
+  rfid.PCD_WriteRegister(rfid.TReloadRegH, 0x03);
+  rfid.PCD_WriteRegister(rfid.TReloadRegL, 0xE8);
+  rfid.PCD_WriteRegister(rfid.TxASKReg, 0x40);
+  rfid.PCD_WriteRegister(rfid.ModeReg, 0x3D);
+  rfid.PCD_AntennaOn();
+}
+
+bool i2c_device_present(uint8_t address)
+{
+  Wire1.beginTransmission(address);
+  return Wire1.endTransmission() == 0;
+}
+
+// =====================================================
+// Servo functions
+// =====================================================
+
+int angleToPulseUs(int angle)
+{
+  angle = constrain(angle, 0, 180);
+  return map(angle, 0, 180, SERVO_MIN_PULSE_US, SERVO_MAX_PULSE_US);
+}
+
+void serviceServoPulses()
+{
+  const unsigned long now = micros();
+
+  if (now - last_servo_frame_us < SERVO_PERIOD_US) {
+    return;
+  }
+
+  last_servo_frame_us = now;
+
+  digitalWrite(SERVO1_PIN, HIGH);
+  delayMicroseconds(upper_pulse_us);
+  digitalWrite(SERVO1_PIN, LOW);
+
+  digitalWrite(SERVO2_PIN, HIGH);
+  delayMicroseconds(lower_pulse_us);
+  digitalWrite(SERVO2_PIN, LOW);
+}
+
+void waitWithServo(unsigned long ms)
+{
+  const unsigned long start = millis();
+
+  while (millis() - start < ms) {
+    serviceServoPulses();
+    delay(1);
+  }
+}
+
+void writeUpperServo(int angle)
+{
+  upper_pulse_us = angleToPulseUs(angle);
+}
+
+void writeLowerServo(int angle)
+{
+  lower_pulse_us = angleToPulseUs(angle);
+}
+
+void closeBothGates()
+{
+  writeUpperServo(UPPER_CLOSED);
+  writeLowerServo(LOWER_CLOSED);
+}
+
+void dispenseOne()
+{
+  Serial.println(F("Dispense cycle..."));
+
+  writeUpperServo(UPPER_OPEN);
+  waitWithServo(robot_config::SEED_UPPER_OPEN_MS);
+
+  writeUpperServo(UPPER_CLOSED);
+  waitWithServo(robot_config::SEED_UPPER_CLOSE_MS);
+
+  writeLowerServo(LOWER_OPEN);
+  waitWithServo(robot_config::SEED_LOWER_OPEN_MS);
+
+  writeLowerServo(LOWER_CLOSED);
+  waitWithServo(robot_config::SEED_LOWER_CLOSE_MS);
+
+  Serial.println(F("Done."));
+}
+
+// =====================================================
+// Line following
 // =====================================================
 
 const char* state_name()
@@ -1347,229 +1460,32 @@ const char* state_name()
   }
 }
 
-void read_rc_discharge_times()
+void centreAfterRFID()
 {
-  for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
-    pinMode(sensor_pins[i], OUTPUT);
-    digitalWrite(sensor_pins[i], HIGH);
+  int L_base = getLeftEncoder();
+  int R_base = getRightEncoder();
+
+  while ((getLeftEncoder() - L_base < 250) || (getRightEncoder() - R_base < 250)) {
+    setMotors(BASE_SPEED, BASE_SPEED);
+    serviceServoPulses();
+    update_turn_angle();
   }
 
-  delayMicroseconds(15);
-
-  for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
-    pinMode(sensor_pins[i], INPUT);
-    raw_values[i] = robot_config::QTR_RC_TIMEOUT_US;
-  }
-
-  const unsigned long start_time_us = micros();
-
-  while (micros() - start_time_us < robot_config::QTR_RC_TIMEOUT_US) {
-    const uint16_t elapsed_us = static_cast<uint16_t>(micros() - start_time_us);
-
-    for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
-      if (raw_values[i] == robot_config::QTR_RC_TIMEOUT_US &&
-          digitalRead(sensor_pins[i]) == LOW) {
-        raw_values[i] = elapsed_us;
-      }
-    }
-  }
+  stopMotors();
 }
 
-void reset_calibration()
+void centreAfterIR()
 {
-  for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
-    min_values[i] = robot_config::QTR_RC_TIMEOUT_US;
-    max_values[i] = 0;
-  }
-}
+  int L_base = getLeftEncoder();
+  int R_base = getRightEncoder();
 
-void update_calibration()
-{
-  for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
-    if (raw_values[i] < min_values[i]) {
-      min_values[i] = raw_values[i];
-    }
-
-    if (raw_values[i] > max_values[i]) {
-      max_values[i] = raw_values[i];
-    }
-  }
-}
-
-void update_calibrated_values()
-{
-  for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
-    const uint16_t range = max_values[i] - min_values[i];
-
-    uint16_t value = 0;
-
-    if (range > 0 && raw_values[i] > min_values[i]) {
-      value = static_cast<uint16_t>(
-        min<uint32_t>(
-          1000,
-          (static_cast<uint32_t>(raw_values[i] - min_values[i]) * 1000) / range
-        )
-      );
-    }
-
-    calibrated_values[i] = robot_config::QTR_LINE_IS_HIGH_RAW ? value : 1000 - value;
-  }
-}
-
-uint16_t target_value_at(uint8_t sensor_index)
-{
-  return robot_config::QTR_FOLLOW_BLACK_LINE
-           ? calibrated_values[sensor_index]
-           : 1000 - calibrated_values[sensor_index];
-}
-
-uint16_t line_peak()
-{
-  uint16_t peak = 0;
-
-  for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
-    const uint16_t value = target_value_at(i);
-
-    if (value > peak) {
-      peak = value;
-    }
+  while ((getLeftEncoder() - L_base < 300) || (getRightEncoder() - R_base < 300)) {
+    setMotors(BASE_SPEED, BASE_SPEED);
+    serviceServoPulses();
+    update_turn_angle();
   }
 
-  return peak;
-}
-
-bool update_line_found()
-{
-  const uint16_t peak = line_peak();
-
-  if (line_detected) {
-    line_detected = peak >= robot_config::QTR_LINE_DETECT_OFF_THRESHOLD;
-  } else {
-    line_detected = peak >= robot_config::QTR_LINE_DETECT_ON_THRESHOLD;
-  }
-
-  return line_detected;
-}
-
-bool intersection_detected()
-{
-  uint8_t high_count = 0;
-
-  for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
-    if (target_value_at(i) >= INTERSECTION_THRESHOLD) {
-      ++high_count;
-    }
-  }
-
-  return high_count >= INTERSECTION_SENSOR_COUNT;
-}
-
-const char* junctionTypeName(JunctionType type)
-{
-  switch (type) {
-    case JunctionType::None:
-      return "none";
-    case JunctionType::Straight:
-      return "straight";
-    case JunctionType::LeftTurn:
-      return "left_turn";
-    case JunctionType::RightTurn:
-      return "right_turn";
-    case JunctionType::TIntersection:
-      return "t_intersection";
-    case JunctionType::WideIntersection:
-      return "wide_intersection";
-    case JunctionType::Lost:
-      return "lost";
-    default:
-      return "unknown";
-  }
-}
-
-bool sensor_active(uint8_t index)
-{
-  return target_value_at(index) >= INTERSECTION_THRESHOLD;
-}
-
-uint8_t count_active_range(uint8_t start_index, uint8_t end_index)
-{
-  uint8_t count = 0;
-
-  for (uint8_t i = start_index; i <= end_index; ++i) {
-    if (sensor_active(i)) {
-      count++;
-    }
-  }
-
-  return count;
-}
-
-JunctionType detect_junction_type()
-{
-  const uint8_t left_count = count_active_range(0, 2);
-  const uint8_t center_count = count_active_range(3, 5);
-  const uint8_t right_count = count_active_range(6, 8);
-
-  const bool left_active = left_count >= 2;
-  const bool center_active = center_count >= 1;
-  const bool right_active = right_count >= 2;
-
-  const uint8_t total_active = left_count + center_count + right_count;
-
-  if (total_active == 0) {
-    return JunctionType::Lost;
-  }
-
-  if (left_active && center_active && right_active) {
-    if (total_active >= 7) {
-      return JunctionType::WideIntersection;
-    }
-
-    return JunctionType::TIntersection;
-  }
-
-  if (left_active && center_active && !right_active) {
-    return JunctionType::LeftTurn;
-  }
-
-  if (!left_active && center_active && right_active) {
-    return JunctionType::RightTurn;
-  }
-
-  if (!left_active && center_active && !right_active) {
-    return JunctionType::Straight;
-  }
-
-  return JunctionType::None;
-}
-
-int32_t estimate_line_position()
-{
-  uint32_t weighted_sum = 0;
-  uint32_t sum = 0;
-
-  for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
-    const uint16_t value = target_value_at(i);
-
-    weighted_sum += static_cast<uint32_t>(value) * i * LINE_POSITION_SCALE;
-    sum += value;
-  }
-
-  if (sum == 0) {
-    return -1;
-  }
-
-  return static_cast<int32_t>(weighted_sum / sum);
-}
-
-void set_follow_state(FollowState next_state)
-{
-  if (follow_state == next_state) {
-    return;
-  }
-
-  follow_state = next_state;
-  state_start_ms = millis();
+  stopMotors();
 }
 
 void update_line_following()
@@ -1577,6 +1493,11 @@ void update_line_following()
   update_calibrated_values();
 
   const bool found = update_line_found();
+
+  if (found) {
+    update_last_line_side();
+  }
+
   const JunctionType junction = found ? detect_junction_type() : JunctionType::Lost;
 
   const bool left_turn = junction == JunctionType::LeftTurn;
@@ -1601,15 +1522,7 @@ void update_line_following()
 
   if (!found) {
     set_follow_state(FollowState::LostLine);
-
-    centreAfterIR();
-
-    if (millis() - state_start_ms < LOST_FORWARD_MS) {
-      drive_forward();
-    } else {
-      search_for_line();
-    }
-
+    recover_lost_line();
     return;
   }
 
@@ -1622,7 +1535,7 @@ void update_line_following()
     set_follow_state(FollowState::FollowLine);
   }
 
-  if (special_junction && millis() - last_junction_detect_ms > 600) {
+  if (special_junction && millis() - last_junction_detect_ms > 700) {
     last_junction_type = junction;
     last_junction_detect_ms = millis();
 
@@ -1634,31 +1547,28 @@ void update_line_following()
     if (junction == JunctionType::LeftTurn) {
       Serial.println("Detected left turn.");
       centreAfterIR();
-      turnLeft90();
+      turnLeft90WithLines();
       return;
     }
 
     if (junction == JunctionType::RightTurn) {
       Serial.println("Detected right turn.");
-      stopMotors();
       centreAfterIR();
-      turnRight90();
+      turnRight90WithLines();
       return;
     }
 
     if (junction == JunctionType::TIntersection) {
       Serial.println("Detected T intersection.");
-      stopMotors();
       centreAfterIR();
-      turnRight90();
+      turnRight90WithLines();
       return;
     }
 
     if (junction == JunctionType::WideIntersection) {
       Serial.println("Detected wide intersection.");
-      stopMotors();
       centreAfterIR();
-      turnRight90();
+      turnRight90WithLines();
       return;
     }
   }
@@ -1668,6 +1578,10 @@ void update_line_following()
   set_follow_state(FollowState::FollowLine);
   follow_line(error);
 }
+
+// =====================================================
+// Printing
+// =====================================================
 
 void print_array(const char* label, const uint16_t* values)
 {
@@ -1703,9 +1617,6 @@ void print_line_status()
   Serial.print(" found=");
   Serial.print(found ? 1 : 0);
 
-  Serial.print(" intersection=");
-  Serial.print(found && intersection_detected() ? 1 : 0);
-
   Serial.print(" junction=");
   if (found) {
     Serial.print(junctionTypeName(detect_junction_type()));
@@ -1719,6 +1630,9 @@ void print_line_status()
   Serial.print(" error=");
   Serial.print(error);
 
+  Serial.print(" last_side=");
+  Serial.print(last_line_side);
+
   Serial.print(" motor=");
   Serial.print(last_left_command);
   Serial.print(',');
@@ -1728,6 +1642,8 @@ void print_line_status()
   print_array("cal", calibrated_values);
 
   printIMUStatus();
+
+  printEncoders();
 
   Serial.println();
 }
@@ -1762,20 +1678,6 @@ void plant()
   delay(50);
 }
 
-/*byte estimatePositionMap()
-{
-  for (int rows = 0; rows > 10; rows++) {
-    for (int cols = 0; cols > 10; cols++) {
-      if (arenaMap[rows][cols] == 5) { // 5 is our robot
-        break
-      }
-    }
-    if (arenaMap[rows][cols] == 5) { // 5 is our robot
-        break
-    }
-  }
-}*/
-
 // =====================================================
 // Setup
 // =====================================================
@@ -1793,10 +1695,9 @@ void setup()
   delay(1000);
 
   Serial.println();
-  Serial.println("=== GIGA R1 merged line-following + RFID + seed dispenser robot ===");
+  Serial.println("=== GIGA R1 line-following + IMU turning + RFID seed robot ===");
 
   beginMotoron();
-
   beginIMU();
 
   pinMode(ENC_LEFT_A, INPUT_PULLUP);
@@ -1889,6 +1790,7 @@ void loop()
     stopMotors();
 
     if (startup_cal_state == StartupCalState::CalibratingIR) {
+      Blue();
       update_calibration();
 
       if (now_ms - calibration_start_ms >= CALIBRATION_TIME_MS) {
@@ -1988,6 +1890,5 @@ void loop()
 
   if (millis() - lastPrintTime >= 1000) {
     lastPrintTime = millis();
-    printEncoders();
   }
 }
