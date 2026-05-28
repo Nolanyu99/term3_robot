@@ -63,6 +63,21 @@ constexpr int RFID_RESET_PIN = -1;
 
 }
 
+// Shared declarations for the tunnel sequence
+enum class MissionPhase { BaseToGate, Tunnel, Arena };
+enum class TunnelState {
+  WaitAtBaseGate,
+  DrivingIntoTunnel,
+  WallFollow,
+  WaitAtExitGate,
+  PassingExitGate
+};
+
+constexpr float GATE_STOP_MM = 100.0f;
+
+extern MissionPhase mission_phase;
+float forward_distance_mm();
+
 // =====================================================
 // State
 // =====================================================
