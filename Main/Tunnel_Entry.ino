@@ -9,11 +9,7 @@
 // -----------------------------------------------------
 // Mission phase (shared with Main.ino and LineSensors.ino)
 // -----------------------------------------------------
-enum class MissionPhase {
-  BaseToGate,   // line following toward the base exit gate
-  Tunnel,       // gate + ramp wall-follow + exit gate sequence
-  Arena         // out in the arena, normal mission
-};
+
 
 MissionPhase mission_phase = MissionPhase::BaseToGate;
 
@@ -28,7 +24,7 @@ constexpr uint8_t TUNNEL_ECHO_FORWARD = 53;
 // -----------------------------------------------------
 // Distance thresholds (mm)
 // -----------------------------------------------------
-constexpr float GATE_STOP_MM           = 100.0f;  // base exit gate detected ahead
+//constexpr float GATE_STOP_MM           = 100.0f;  // base exit gate detected ahead
 constexpr float BASE_DOOR_OPEN_MM      = 250.0f;  // base gate has opened
 constexpr float TARGET_SIDE_MM         = 60.0f;   // wall-follow target distance
 constexpr float SIDE_WALL_DETECTED_MM  = 120.0f;  // side wall is "found"
@@ -55,13 +51,7 @@ constexpr unsigned long BASE_EXIT_DRIVE_TIMEOUT_MS = 3000;
 // -----------------------------------------------------
 // Internal tunnel sub-states
 // -----------------------------------------------------
-enum class TunnelState {
-  WaitAtBaseGate,   // stopped at base gate, waiting for it to open
-  DrivingIntoTunnel,// driving forward into the tunnel
-  WallFollow,       // following the wall up the ramp
-  WaitAtExitGate,   // stopped at outer door, waiting
-  PassingExitGate   // driving through the outer door
-};
+
 
 TunnelState tunnel_state = TunnelState::WaitAtBaseGate;
 
