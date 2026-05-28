@@ -187,3 +187,11 @@ void centreAfterIR()
 
   stopMotors();
 }
+
+void drive_forward_gap()
+{
+  setMotors(
+    LEFT_FORWARD_SIGN * LINE_GAP_SPEED,
+    RIGHT_FORWARD_SIGN * LINE_GAP_SPEED
+  );
+}
