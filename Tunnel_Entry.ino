@@ -30,8 +30,8 @@ constexpr uint8_t TUNNEL_ECHO_FORWARD = 53;
 // -----------------------------------------------------
 constexpr float GATE_STOP_MM           = 100.0f;  // base exit gate detected ahead
 constexpr float BASE_DOOR_OPEN_MM      = 250.0f;  // base gate has opened
-constexpr float TARGET_SIDE_MM         = 50.0f;   // wall-follow target distance
-constexpr float SIDE_WALL_DETECTED_MM  = 100.0f;  // side wall is "found"
+constexpr float TARGET_SIDE_MM         = 60.0f;   // wall-follow target distance
+constexpr float SIDE_WALL_DETECTED_MM  = 120.0f;  // side wall is "found"
 constexpr float TUNNEL_DOOR_CLOSED_MM  = 50.0f;   // outer door detected ahead
 constexpr float TUNNEL_DOOR_OPEN_MM    = 250.0f;  // outer door has opened
 constexpr float TUNNEL_DONE_MM         = 500.0f;  // fully through outer door
@@ -49,7 +49,7 @@ constexpr int16_t  WALL_MAX_SPEED   = 600;
 // Distance gate before checking for the side wall
 // (so the robot drives fully into the tunnel first)
 // -----------------------------------------------------
-constexpr long BASE_EXIT_MIN_DISTANCE_COUNTS = 1000;
+constexpr long BASE_EXIT_MIN_DISTANCE_COUNTS = 2000;
 constexpr unsigned long BASE_EXIT_DRIVE_TIMEOUT_MS = 3000;
 
 // -----------------------------------------------------
