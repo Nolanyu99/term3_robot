@@ -258,22 +258,18 @@ void set_follow_state(FollowState next_state)
 
 void update_line_following()
 {
-
-  // Gate check first — before any line logic can trigger recovery
-  if (mission_phase == MissionPhase::BaseToGate &&
-      forward_distance_mm() < GATE_STOP_MM) {
-    stopMotors();
-    mission_phase = MissionPhase::Tunnel;
-    return;
-  }
-
-  
   update_calibrated_values();
 
   const bool found = update_line_found();
 
   if (found) {
+    
     update_last_line_side();
+
+    if (follow_state == FollowState::LineGap) {
+      Serial.println("line_gap=recovered");
+      set_follow_state(FollowState::FollowLine);
+    }
   }
 
   const JunctionType junction = found ? detect_junction_type() : JunctionType::Lost;
@@ -299,7 +295,22 @@ void update_line_following()
   }
 
   if (!found) {
-    set_follow_state(FollowState::LostLine);
+    if (follow_state != FollowState::LineGap &&
+        follow_state != FollowState::LostLine) {
+      set_follow_state(FollowState::LineGap);
+      Serial.println("line_gap=start");
+    }
+
+    if (follow_state == FollowState::LineGap) {
+      if (millis() - state_start_ms < LINE_GAP_FORWARD_MS) {
+        drive_forward_gap();
+        return;
+      }
+
+      Serial.println("line_gap=timeout_lost");
+      set_follow_state(FollowState::LostLine);
+    }
+
     recover_lost_line();
     return;
   }
