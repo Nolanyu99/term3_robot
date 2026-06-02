@@ -2,19 +2,17 @@
 // Obstacle swerve test sketch (standalone)
 //
 // Behaviour:
-//   1. Line follow until forward ultrasonic detects an obstacle.
-//   2. Turn right 90°.
-//   3. Drive straight (line follow) until BOTH:
-//        - the forward ultrasonic no longer detects an obstacle, AND
-//        - an RFID tag (junction) is read.
-//   4. Turn left 90°.
-//   5. Drive straight (line follow) until BOTH:
-//        - no obstacle ahead, AND
-//        - an RFID tag is read.
+//   1. Line follow normally.
+//   2. Forward ultrasonic sees obstacle -> ApproachObstacle.
+//   3. Continue line following until the next RFID junction
+//      (the node 1 tile before the obstacle), then stop.
+//   4. Turn right 90° (uses turnRight90WithLines from Turning.ino).
+//   5. Line follow until the obstacle is no longer ahead,
+//      THEN until the next RFID junction. Stop.
 //   6. Turn left 90°.
-//   7. Drive straight until the next RFID tag is read.
-//      (This is the node on the original trajectory.)
-//   8. Stop.
+//   7. Same as 5.
+//   8. Turn left 90°.
+//   9. Line follow to next RFID junction (back on original line). Stop.
 // =====================================================
 
 #include <Arduino.h>
@@ -28,7 +26,7 @@
 constexpr uint8_t TRIG_FORWARD = 52;
 constexpr uint8_t ECHO_FORWARD = 53;
 
-// QTR sensors (same pins as your existing setup)
+// QTR sensors
 constexpr uint8_t SENSOR_COUNT = 9;
 const uint8_t sensor_pins[SENSOR_COUNT] = {2, 3, 4, 5, 8, 9, 10, 11, 12};
 
@@ -40,7 +38,6 @@ constexpr uint8_t MOTOR_LEFT  = 1;
 constexpr uint8_t MOTOR_RIGHT = 2;
 constexpr int16_t MAX_SPEED   = 600;
 constexpr int16_t BASE_SPEED  = 250;
-constexpr int16_t TURN_SPEED  = 230;
 constexpr float   LINE_KP     = 0.055f;
 
 // -----------------------------------------------------
@@ -53,7 +50,7 @@ constexpr unsigned long RFID_COOLDOWN_MS = 1500;
 unsigned long last_rfid_ms = 0;
 
 // -----------------------------------------------------
-// Encoders (for turns)
+// Encoders (used by Turning.ino's turn functions)
 // -----------------------------------------------------
 constexpr uint8_t ENC_LEFT_A  = 28;
 constexpr uint8_t ENC_LEFT_B  = 26;
@@ -63,8 +60,6 @@ constexpr uint8_t ENC_RIGHT_B = 24;
 volatile long encoder_left_count = 0;
 volatile long encoder_right_count = 0;
 
-constexpr long TURN_90_COUNTS = 1540;   // adjust to your robot
-
 // -----------------------------------------------------
 // Thresholds
 // -----------------------------------------------------
@@ -73,11 +68,11 @@ constexpr float MIN_VALID_MM       = 20.0f;
 constexpr float MAX_VALID_MM       = 2000.0f;
 
 // -----------------------------------------------------
-// QTR calibration
+// QTR
 // -----------------------------------------------------
-constexpr uint16_t QTR_TIMEOUT_US = 1000;
-constexpr uint16_t LINE_ON_THRESHOLD  = 650;
-constexpr uint16_t LINE_OFF_THRESHOLD = 450;
+constexpr uint16_t QTR_TIMEOUT_US      = 1000;
+constexpr uint16_t LINE_ON_THRESHOLD   = 650;
+constexpr uint16_t LINE_OFF_THRESHOLD  = 450;
 constexpr unsigned long CALIBRATION_MS = 5000;
 constexpr uint16_t LINE_POSITION_SCALE = 1000;
 constexpr int32_t  LINE_CENTER = ((SENSOR_COUNT - 1) * LINE_POSITION_SCALE) / 2;
@@ -95,17 +90,19 @@ float last_valid_forward_mm = 1000.0f;
 // State machine
 // -----------------------------------------------------
 enum class SwerveState {
-  LineFollow,          // line follow until obstacle detected
-  TurnRight,           // first turn (90° right)
-  GoStraightUntilJunc1,// drive past obstacle to next junction
-  TurnLeft1,           // first left turn
-  GoStraightUntilJunc2,// continue past obstacle to next junction
-  TurnLeft2,           // second left turn
-  GoStraightUntilJunc3,// back to original trajectory
+  LineFollow,
+  ApproachObstacle,
+  TurnRight,
+  GoStraightUntilJunc1,
+  TurnLeft1,
+  GoStraightUntilJunc2,
+  TurnLeft2,
+  GoStraightUntilJunc3,
   Done
 };
 
 SwerveState state = SwerveState::LineFollow;
+bool obstacle_cleared = false;
 
 // =====================================================
 // Encoder ISRs
@@ -139,31 +136,7 @@ void setMotors(int16_t left, int16_t right) {
 }
 
 void stopMotors() { setMotors(0, 0); }
-
 void driveForward() { setMotors(BASE_SPEED, BASE_SPEED); }
-
-// =====================================================
-// Turn primitives (encoder-counted, blocking)
-// =====================================================
-void turnRight90Blocking() {
-  long lstart = getLeftEncoder();
-  long rstart = getRightEncoder();
-  while ((getLeftEncoder() - lstart < TURN_90_COUNTS) ||
-         (getRightEncoder() - rstart > -TURN_90_COUNTS)) {
-    setMotors(TURN_SPEED, -TURN_SPEED);
-  }
-  stopMotors();
-}
-
-void turnLeft90Blocking() {
-  long lstart = getLeftEncoder();
-  long rstart = getRightEncoder();
-  while ((getLeftEncoder() - lstart > -TURN_90_COUNTS) ||
-         (getRightEncoder() - rstart < TURN_90_COUNTS)) {
-    setMotors(-TURN_SPEED, TURN_SPEED);
-  }
-  stopMotors();
-}
 
 // =====================================================
 // Ultrasonic
@@ -257,7 +230,6 @@ void followLineStep() {
   int32_t err = pos >= 0 ? pos - LINE_CENTER : last_error;
 
   if (!found) {
-    // Drive straight at last-known error if line briefly lost
     driveForward();
     return;
   }
@@ -268,7 +240,7 @@ void followLineStep() {
 }
 
 // =====================================================
-// RFID
+// RFID — junction detection
 // =====================================================
 bool junctionReached() {
   if (millis() - last_rfid_ms < RFID_COOLDOWN_MS) return false;
@@ -304,40 +276,60 @@ void runStateMachine() {
     case SwerveState::LineFollow:
       followLineStep();
       if (obstacleAhead()) {
-        Serial.println("Obstacle ahead — swerving right.");
+        Serial.println("Obstacle ahead — approaching to next junction.");
+        setState(SwerveState::ApproachObstacle);
+      }
+      break;
+
+    case SwerveState::ApproachObstacle:
+      followLineStep();
+      if (junctionReached()) {
+        Serial.println("At node 1 tile before obstacle — stopping.");
         stopMotors();
         setState(SwerveState::TurnRight);
       }
       break;
 
     case SwerveState::TurnRight:
-      turnRight90Blocking();
+      turnRight90WithLines();
+      obstacle_cleared = false;
       setState(SwerveState::GoStraightUntilJunc1);
       break;
 
     case SwerveState::GoStraightUntilJunc1:
       followLineStep();
-      if (!obstacleAhead() && junctionReached()) {
+      if (!obstacle_cleared) {
+        if (!obstacleAhead()) {
+          Serial.println("Obstacle passed (leg 1).");
+          obstacle_cleared = true;
+        }
+      } else if (junctionReached()) {
         stopMotors();
         setState(SwerveState::TurnLeft1);
       }
       break;
 
     case SwerveState::TurnLeft1:
-      turnLeft90Blocking();
+      turnLeft90WithLines();
+      obstacle_cleared = false;
       setState(SwerveState::GoStraightUntilJunc2);
       break;
 
     case SwerveState::GoStraightUntilJunc2:
       followLineStep();
-      if (!obstacleAhead() && junctionReached()) {
+      if (!obstacle_cleared) {
+        if (!obstacleAhead()) {
+          Serial.println("Obstacle passed (leg 2).");
+          obstacle_cleared = true;
+        }
+      } else if (junctionReached()) {
         stopMotors();
         setState(SwerveState::TurnLeft2);
       }
       break;
 
     case SwerveState::TurnLeft2:
-      turnLeft90Blocking();
+      turnLeft90WithLines();
       setState(SwerveState::GoStraightUntilJunc3);
       break;
 
