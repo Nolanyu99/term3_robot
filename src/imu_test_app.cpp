@@ -16,8 +16,8 @@ constexpr float TURN_TARGET_DEG = 88.0f;//for a 90 degree turn, we target slight
 
 constexpr uint8_t MOTOR_LEFT = 1;
 constexpr uint8_t MOTOR_RIGHT = 2;
-constexpr int16_t FORWARD_SPEED = 300;
-constexpr int16_t TURN_SPEED = 300;
+constexpr int16_t FORWARD_SPEED = 400;
+constexpr int16_t TURN_SPEED = 500;
 constexpr int8_t LEFT_FORWARD_SIGN = 1;
 constexpr int8_t RIGHT_FORWARD_SIGN = 1;
 constexpr uint8_t RIGHT_MOTOR_TRIM_PERCENT = 95;

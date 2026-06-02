@@ -42,6 +42,12 @@ void line_follow_test_app_setup();
 void line_follow_test_app_loop();
 void imu_test_app_setup();
 void imu_test_app_loop();
+void up_to_line_following_app_setup();
+void up_to_line_following_app_loop();
+void arduino_test_app_setup();
+void arduino_test_app_loop();
+void individual_wheel_test_app_setup();
+void individual_wheel_test_app_loop();
 
 void setup() {
 #if APP_MODE == 0
@@ -84,8 +90,14 @@ void setup() {
     motor_messenger_button_led_app_setup();
 #elif APP_MODE == 19
     imu_test_app_setup();
+#elif APP_MODE == 20
+    up_to_line_following_app_setup();
+#elif APP_MODE == 21
+    arduino_test_app_setup();
+#elif APP_MODE == 22
+    individual_wheel_test_app_setup();
 #else
-#error "Unknown APP_MODE. Use 0=robot, 1=wifi test, 2=motor test, 3=upload test, 4=encoder test, 5=QTR test, 6=button/LED test, 7=simple Motoron test, 8=ultrasonic test, 9=servo test, 10=RFID test, 11=IR/QTR-RC test, 12=QTR library analog test, 13=MiniMessenger test, 14=motor MiniMessenger test, 15=updated IR/QTR-RC test, 16=line follow test, 17=motor MiniMessenger button/LED test, 18=motor MiniMessenger button/LED ultrasonic stop test, 19=IMU test."
+#error "Unknown APP_MODE. Use 0=robot, 1=wifi test, 2=motor test, 3=upload test, 4=encoder test, 5=QTR test, 6=button/LED test, 7=simple Motoron test, 8=ultrasonic test, 9=servo test, 10=RFID test, 11=IR/QTR-RC test, 12=QTR library analog test, 13=MiniMessenger test, 14=motor MiniMessenger test, 15=updated IR/QTR-RC test, 16=line follow test, 17=motor MiniMessenger button/LED test, 18=motor MiniMessenger button/LED ultrasonic stop test, 19=IMU test, 20=up-to-line-following robot test, 21=Arduino smoke test, 22=individual wheel test."
 #endif
 }
 
@@ -130,5 +142,11 @@ void loop() {
     motor_messenger_button_led_app_loop();
 #elif APP_MODE == 19
     imu_test_app_loop();
+#elif APP_MODE == 20
+    up_to_line_following_app_loop();
+#elif APP_MODE == 21
+    arduino_test_app_loop();
+#elif APP_MODE == 22
+    individual_wheel_test_app_loop();
 #endif
 }

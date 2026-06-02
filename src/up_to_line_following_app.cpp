@@ -119,6 +119,15 @@ enum class JunctionType {
   Lost
 };
 
+enum class JunctionDecision {
+  Straight,
+  Left,
+  Right,
+};
+
+constexpr JunctionDecision T_INTERSECTION_DECISION = JunctionDecision::Right;
+constexpr JunctionDecision WIDE_INTERSECTION_DECISION = JunctionDecision::Right;
+
 JunctionType last_junction_type = JunctionType::None;
 unsigned long last_junction_detect_ms = 0;
 
@@ -127,6 +136,20 @@ const char* junctionTypeName(JunctionType type);
 bool sensor_active(uint8_t index);
 uint8_t count_active_range(uint8_t start_index, uint8_t end_index);
 JunctionType detect_junction_type();
+uint16_t line_peak();
+uint16_t target_value_at(uint8_t sensor_index);
+int32_t estimate_line_position();
+void read_rc_discharge_times();
+void update_calibrated_values();
+void set_follow_state(FollowState next_state);
+void follow_line(int32_t error);
+void reset_turn_angle();
+void update_turn_angle();
+bool imuTurnDegrees(float target_degrees, int8_t direction);
+void serviceServoPulses();
+void centreAfterRFID();
+void print_hex2(byte value);
+bool lineCenteredForTurn();
 
 enum class StartupCalState {
   CalibratingIR,
@@ -136,6 +159,7 @@ enum class StartupCalState {
 };
 
 StartupCalState startup_cal_state = StartupCalState::CalibratingIR;
+bool startup_blocked = false;
 
 constexpr unsigned long IMU_STILL_WAIT_MS = 3000;
 unsigned long imu_still_start_ms = 0;
@@ -157,7 +181,7 @@ constexpr unsigned long RFID_SCAN_COOLDOWN_MS = 1500;
 // =====================================================
 
 constexpr unsigned long IMU_PRINT_INTERVAL_MS = 250;
-constexpr unsigned long TURN_TIMEOUT_MS = 5000;
+constexpr unsigned long TURN_TIMEOUT_MS = 8000;
 constexpr uint16_t GYRO_BIAS_SAMPLE_COUNT = 200;
 constexpr unsigned long GYRO_BIAS_SAMPLE_DELAY_MS = 5;
 
@@ -166,6 +190,11 @@ constexpr float GYRO_Z_DEADBAND_DPS = 0.4f;
 
 constexpr float TURN_90_TARGET_DEG = 90.0f;
 constexpr float TURN_180_TARGET_DEG = 180.0f;
+constexpr float CORNER_IMU_APPROACH_DEG = 70.0f;
+constexpr float TURN_LINE_SETTLE_DEG = 12.0f;
+constexpr uint8_t CORNER_CENTER_STABLE_SAMPLES = 4;
+constexpr unsigned long CORNER_IGNORE_LINE_MS = 250;
+constexpr unsigned long CORNER_FIND_LINE_TIMEOUT_MS = 5000;
 
 constexpr uint8_t ADXL345_ADDRESS = 0x53;
 constexpr uint8_t ADXL345_DEVID = 0x00;
@@ -265,8 +294,27 @@ const long TURN_90_COUNTS = 1540;
 const long TURN_180_COUNTS = 3070;
 
 const int16_t TURN_SPEED = 250;
+const int16_t TURN_ALIGN_SPEED = 150;
 constexpr int16_t BASE_SPEED = 250;
 constexpr int16_t LOST_SEARCH_SPEED = 200;
+
+constexpr bool ENABLE_OPEN_FIELD_TEST4 = true;
+constexpr long OPEN_FIELD_COUNTS_PER_NODE = 2400L;
+constexpr float OPEN_FIELD_FIRST_STRAIGHT_NODES = 2.0f;
+constexpr float OPEN_FIELD_SIDE_STRAIGHT_NODES = 1.0f;
+constexpr float OPEN_FIELD_FINAL_STRAIGHT_NODES = 2.0f;
+constexpr int16_t OPEN_FIELD_BASE_SPEED = 160;
+constexpr float OPEN_FIELD_ENCODER_KP = 0.08f;
+constexpr float OPEN_FIELD_HEADING_KP = 0.0f;
+constexpr int16_t OPEN_FIELD_MAX_CORRECTION = 80;
+constexpr unsigned long OPEN_FIELD_TIMEOUT_PER_NODE_MS = 4500;
+constexpr bool OPEN_FIELD_USE_RFID_CENTERING = true;
+constexpr bool OPEN_FIELD_REQUIRE_TARGET_RFID = true;
+constexpr int16_t OPEN_FIELD_RFID_SEARCH_SPEED = 150;
+constexpr long OPEN_FIELD_RFID_IGNORE_START_COUNTS = OPEN_FIELD_COUNTS_PER_NODE / 3L;
+constexpr long OPEN_FIELD_RFID_MIN_GAP_COUNTS = (OPEN_FIELD_COUNTS_PER_NODE * 3L) / 5L;
+constexpr long OPEN_FIELD_RFID_FALLBACK_EXTRA_COUNTS = OPEN_FIELD_COUNTS_PER_NODE;
+constexpr unsigned long OPEN_FIELD_RFID_SCAN_COOLDOWN_MS = 700;
 
 const int16_t MAX_SPEED_R = 800;
 const int16_t MAX_SPEED_L = 800;
@@ -316,6 +364,8 @@ int previousStateRed = 0;
 bool running = true;
 bool Reviving = false;
 int previousOffButtonPressed = 1;
+bool open_field_test4_done = false;
+bool open_field_test4_running = false;
 
 // =====================================================
 // RFID section
@@ -448,6 +498,19 @@ void stopMotors()
   setMotors(0, 0);
 }
 
+bool motionAbortRequested()
+{
+  if (digitalRead(OffButtonPin) != LOW) {
+    return false;
+  }
+
+  running = false;
+  run_enabled = false;
+  stopMotors();
+  Serial.println("motion_abort=button");
+  return true;
+}
+
 void configureMotor(uint8_t motor)
 {
   mc.setMaxAcceleration(motor, ACCEL);
@@ -520,6 +583,242 @@ void follow_line(int32_t error)
   setMotors(left_speed, right_speed);
 }
 
+long absLong(long value)
+{
+  return value < 0 ? -value : value;
+}
+
+long averageTravelCounts(long left_base, long right_base)
+{
+  const long left_delta = absLong(getLeftEncoder() - left_base);
+  const long right_delta = absLong(getRightEncoder() - right_base);
+
+  return (left_delta + right_delta) / 2;
+}
+
+bool readOpenFieldRfidNode()
+{
+  if (!OPEN_FIELD_USE_RFID_CENTERING) {
+    return false;
+  }
+
+  if (millis() - lastScanTime < OPEN_FIELD_RFID_SCAN_COOLDOWN_MS) {
+    return false;
+  }
+
+  if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial()) {
+    return false;
+  }
+
+  Serial.print("open_field_rfid_uid=");
+
+  for (byte i = 0; i < rfid.uid.size; ++i) {
+    print_hex2(rfid.uid.uidByte[i]);
+    Serial.print(' ');
+  }
+
+  Serial.println();
+
+  rfid.PICC_HaltA();
+  lastScanTime = millis();
+
+  return true;
+}
+
+bool driveStraightCounts(long target_counts, uint8_t target_rfid_nodes, const char* label)
+{
+  if (!motoron_ready) {
+    Serial.println("open_field_error=motoron_not_ready");
+    return false;
+  }
+
+  if (target_counts <= 0) {
+    return true;
+  }
+
+  const long left_base = getLeftEncoder();
+  const long right_base = getRightEncoder();
+  const unsigned long start_ms = millis();
+  const long max_counts =
+    OPEN_FIELD_USE_RFID_CENTERING && target_rfid_nodes > 0
+      ? target_counts + OPEN_FIELD_RFID_FALLBACK_EXTRA_COUNTS
+      : target_counts;
+  const unsigned long timeout_ms =
+    static_cast<unsigned long>(
+      (static_cast<float>(max_counts) / static_cast<float>(OPEN_FIELD_COUNTS_PER_NODE)) *
+      OPEN_FIELD_TIMEOUT_PER_NODE_MS
+    ) + 1500;
+
+  unsigned long last_status_ms = 0;
+  uint8_t rfid_nodes_seen = 0;
+  long last_rfid_moved_counts = 0;
+
+  reset_turn_angle();
+
+  Serial.print("open_field_drive_start=");
+  Serial.print(label);
+  Serial.print(" target_counts=");
+  Serial.print(target_counts);
+  Serial.print(" target_rfid_nodes=");
+  Serial.println(target_rfid_nodes);
+
+  while (averageTravelCounts(left_base, right_base) < max_counts) {
+    serviceServoPulses();
+    update_turn_angle();
+
+    if (motionAbortRequested()) {
+      return false;
+    }
+
+    const long left_delta = absLong(getLeftEncoder() - left_base);
+    const long right_delta = absLong(getRightEncoder() - right_base);
+    const long moved_counts = (left_delta + right_delta) / 2;
+    const long encoder_error = left_delta - right_delta;
+    const bool searching_for_rfid =
+      OPEN_FIELD_USE_RFID_CENTERING &&
+      target_rfid_nodes > 0 &&
+      rfid_nodes_seen < target_rfid_nodes &&
+      moved_counts >= target_counts;
+    const int16_t drive_speed =
+      searching_for_rfid ? OPEN_FIELD_RFID_SEARCH_SPEED : OPEN_FIELD_BASE_SPEED;
+
+    const int16_t correction = constrain(
+      static_cast<int16_t>(
+        (OPEN_FIELD_ENCODER_KP * static_cast<float>(encoder_error)) +
+        (OPEN_FIELD_HEADING_KP * turn_angle_deg)
+      ),
+      -OPEN_FIELD_MAX_CORRECTION,
+      OPEN_FIELD_MAX_CORRECTION
+    );
+
+    setMotors(
+      LEFT_FORWARD_SIGN * (drive_speed - correction),
+      RIGHT_FORWARD_SIGN * (drive_speed + correction)
+    );
+
+    if (OPEN_FIELD_USE_RFID_CENTERING &&
+        target_rfid_nodes > 0 &&
+        moved_counts >= OPEN_FIELD_RFID_IGNORE_START_COUNTS &&
+        moved_counts - last_rfid_moved_counts >= OPEN_FIELD_RFID_MIN_GAP_COUNTS &&
+        readOpenFieldRfidNode()) {
+      stopMotors();
+
+      ++rfid_nodes_seen;
+
+      Serial.print("open_field_rfid_node=");
+      Serial.print(label);
+      Serial.print(" seen=");
+      Serial.print(rfid_nodes_seen);
+      Serial.print("/");
+      Serial.println(target_rfid_nodes);
+
+      centreAfterRFID();
+      reset_turn_angle();
+      last_rfid_moved_counts = averageTravelCounts(left_base, right_base);
+
+      if (rfid_nodes_seen >= target_rfid_nodes) {
+        stopMotors();
+        Serial.print("open_field_drive_done=");
+        Serial.print(label);
+        Serial.print(" reason=rfid moved=");
+        Serial.println(averageTravelCounts(left_base, right_base));
+        delay(100);
+        return true;
+      }
+    }
+
+    const unsigned long now_ms = millis();
+
+    if (now_ms - last_status_ms >= 500) {
+      last_status_ms = now_ms;
+
+      Serial.print("open_field_drive_progress=");
+      Serial.print(label);
+      Serial.print(" moved=");
+      Serial.print(moved_counts);
+      Serial.print(" left=");
+      Serial.print(left_delta);
+      Serial.print(" right=");
+      Serial.print(right_delta);
+      Serial.print(" rfid=");
+      Serial.print(rfid_nodes_seen);
+      Serial.print("/");
+      Serial.print(target_rfid_nodes);
+      Serial.print(" search=");
+      Serial.print(searching_for_rfid ? 1 : 0);
+      Serial.print(" corr=");
+      Serial.println(correction);
+    }
+
+    if (now_ms - start_ms >= timeout_ms) {
+      stopMotors();
+      Serial.print("open_field_drive_timeout=");
+      Serial.println(label);
+      return false;
+    }
+  }
+
+  stopMotors();
+
+  Serial.print("open_field_drive_done=");
+  Serial.print(label);
+  Serial.print(" reason=counts");
+  Serial.print(" moved=");
+  Serial.print(averageTravelCounts(left_base, right_base));
+  Serial.print(" rfid=");
+  Serial.print(rfid_nodes_seen);
+  Serial.print("/");
+  Serial.println(target_rfid_nodes);
+
+  delay(100);
+
+  if (OPEN_FIELD_REQUIRE_TARGET_RFID &&
+      OPEN_FIELD_USE_RFID_CENTERING &&
+      target_rfid_nodes > 0 &&
+      rfid_nodes_seen < target_rfid_nodes) {
+    Serial.print("open_field_drive_failed_missing_rfid=");
+    Serial.println(label);
+    return false;
+  }
+
+  return true;
+}
+
+bool driveStraightNodes(float nodes, const char* label)
+{
+  const long target_counts =
+    static_cast<long>((nodes * static_cast<float>(OPEN_FIELD_COUNTS_PER_NODE)) + 0.5f);
+  const uint8_t target_rfid_nodes = static_cast<uint8_t>(nodes + 0.5f);
+
+  return driveStraightCounts(target_counts, target_rfid_nodes, label);
+}
+
+void runOpenFieldTest4()
+{
+  open_field_test4_running = true;
+  set_follow_state(FollowState::Idle);
+
+  Serial.println("open_field_test4_start");
+  Serial.print("open_field_counts_per_node=");
+  Serial.println(OPEN_FIELD_COUNTS_PER_NODE);
+
+  bool ok = true;
+
+  ok = ok && driveStraightNodes(OPEN_FIELD_FIRST_STRAIGHT_NODES, "leg1");
+  ok = ok && imuTurnDegrees(TURN_90_TARGET_DEG, -1);
+  ok = ok && driveStraightNodes(OPEN_FIELD_SIDE_STRAIGHT_NODES, "leg2");
+  ok = ok && imuTurnDegrees(TURN_90_TARGET_DEG, 1);
+  ok = ok && driveStraightNodes(OPEN_FIELD_FINAL_STRAIGHT_NODES, "leg3");
+
+  stopMotors();
+
+  open_field_test4_done = true;
+  open_field_test4_running = false;
+
+  Serial.print("open_field_test4_result=");
+  Serial.println(ok ? "done" : "failed_or_aborted");
+}
+
 // Forward declaration because centreAfterRFID uses it.
 void serviceServoPulses();
 
@@ -527,10 +826,15 @@ void centreAfterRFID()
 {
   int L_base = getLeftEncoder();
   int R_base = getRightEncoder();
+  const unsigned long start_ms = millis();
 
   while ((getLeftEncoder() - L_base < 250) || (getRightEncoder() - R_base < 250)) {
     setMotors(BASE_SPEED, BASE_SPEED);
     serviceServoPulses();
+    if (millis() - start_ms > 1500) {
+      Serial.println("centre_after_rfid_timeout");
+      break;
+    }
   }
 
   stopMotors();
@@ -540,10 +844,15 @@ void centreAfterIR()
 {
   int L_base = getLeftEncoder();
   int R_base = getRightEncoder();
+  const unsigned long start_ms = millis();
 
   while ((getLeftEncoder() - L_base < 300) || (getRightEncoder() - R_base < 300)) {
     setMotors(BASE_SPEED, BASE_SPEED);
     serviceServoPulses();
+    if (millis() - start_ms > 1500) {
+      Serial.println("centre_after_ir_timeout");
+      break;
+    }
   }
 
   stopMotors();
@@ -579,6 +888,10 @@ bool imuTurnDegrees(float target_degrees, int8_t direction)
   while (fabsf(turn_angle_deg) < target_degrees) {
     serviceServoPulses();
     update_turn_angle();
+
+    if (motionAbortRequested()) {
+      return false;
+    }
 
     if (direction > 0) {
       setMotors(-LEFT_FORWARD_SIGN * TURN_SPEED,
@@ -624,6 +937,87 @@ void turnLeft180()
 void turnRight180()
 {
   imuTurnDegrees(TURN_180_TARGET_DEG, -1);
+}
+
+bool slowTurnUntilCenteredLine(int8_t direction, unsigned long timeout_ms)
+{
+  direction = direction >= 0 ? 1 : -1;
+
+  const unsigned long start_ms = millis();
+  uint8_t centered_samples = 0;
+
+  while (millis() - start_ms < timeout_ms) {
+    serviceServoPulses();
+
+    if (direction > 0) {
+      setMotors(-LEFT_FORWARD_SIGN * TURN_ALIGN_SPEED,
+                 RIGHT_FORWARD_SIGN * TURN_ALIGN_SPEED);
+    } else {
+      setMotors( LEFT_FORWARD_SIGN * TURN_ALIGN_SPEED,
+                -RIGHT_FORWARD_SIGN * TURN_ALIGN_SPEED);
+    }
+
+    read_rc_discharge_times();
+    update_calibrated_values();
+
+    const bool can_accept_line = millis() - start_ms >= CORNER_IGNORE_LINE_MS;
+
+    if (can_accept_line && lineCenteredForTurn()) {
+      centered_samples++;
+    } else {
+      centered_samples = 0;
+    }
+
+    if (centered_samples >= CORNER_CENTER_STABLE_SAMPLES) {
+      stopMotors();
+      last_error = 0;
+      line_detected = true;
+      set_follow_state(FollowState::FollowLine);
+      follow_line(0);
+      Serial.println("corner_turn_result=line_centered");
+      return true;
+    }
+  }
+
+  stopMotors();
+  line_detected = false;
+  set_follow_state(FollowState::LostLine);
+  Serial.println("corner_turn_result=line_not_found");
+  return false;
+}
+
+bool cornerTurnToLine(int8_t direction)
+{
+  direction = direction >= 0 ? 1 : -1;
+
+  Serial.print("corner_qtr_turn_start=");
+  Serial.println(direction > 0 ? "left" : "right");
+
+  centreAfterIR();
+
+  return slowTurnUntilCenteredLine(direction, CORNER_FIND_LINE_TIMEOUT_MS);
+}
+
+void driveStraightThroughJunction()
+{
+  centreAfterIR();
+  set_follow_state(FollowState::CrossIntersection);
+  drive_forward();
+}
+
+void handleTIntersectionDecision(JunctionDecision decision)
+{
+  if (decision == JunctionDecision::Left) {
+    cornerTurnToLine(1);
+    return;
+  }
+
+  if (decision == JunctionDecision::Right) {
+    cornerTurnToLine(-1);
+    return;
+  }
+
+  driveStraightThroughJunction();
 }
 
 // =====================================================
@@ -1536,6 +1930,16 @@ JunctionType detect_junction_type()
     return JunctionType::RightTurn;
   }
 
+  // At a sharp 90-degree corner the center sensors can leave the line before
+  // the side sensors do. Treat side-only detections as corner entries.
+  if (left_active && !center_active && !right_active) {
+    return JunctionType::LeftTurn;
+  }
+
+  if (!left_active && !center_active && right_active) {
+    return JunctionType::RightTurn;
+  }
+
   if (!left_active && center_active && !right_active) {
     return JunctionType::Straight;
   }
@@ -1602,8 +2006,6 @@ void update_line_following()
   if (!found) {
     set_follow_state(FollowState::LostLine);
 
-    centreAfterIR();
-
     if (millis() - state_start_ms < LOST_FORWARD_MS) {
       drive_forward();
     } else {
@@ -1633,32 +2035,28 @@ void update_line_following()
 
     if (junction == JunctionType::LeftTurn) {
       Serial.println("Detected left turn.");
-      centreAfterIR();
-      turnLeft90();
+      cornerTurnToLine(1);
       return;
     }
 
     if (junction == JunctionType::RightTurn) {
       Serial.println("Detected right turn.");
       stopMotors();
-      centreAfterIR();
-      turnRight90();
+      cornerTurnToLine(-1);
       return;
     }
 
     if (junction == JunctionType::TIntersection) {
       Serial.println("Detected T intersection.");
       stopMotors();
-      centreAfterIR();
-      turnRight90();
+      handleTIntersectionDecision(T_INTERSECTION_DECISION);
       return;
     }
 
     if (junction == JunctionType::WideIntersection) {
       Serial.println("Detected wide intersection.");
       stopMotors();
-      centreAfterIR();
-      turnRight90();
+      handleTIntersectionDecision(WIDE_INTERSECTION_DECISION);
       return;
     }
   }
@@ -1780,7 +2178,7 @@ void plant()
 // Setup
 // =====================================================
 
-void setup()
+void up_to_line_following_app_setup()
 {
   Serial.begin(115200);
 
@@ -1819,6 +2217,7 @@ void setup()
   } else {
     Serial.println("No I2C device found at 0x28 on SDA1/SCL1");
     Serial.println("Check VCC, GND, SDA1, and SCL1 wiring");
+    startup_blocked = true;
     return;
   }
 
@@ -1832,6 +2231,7 @@ void setup()
     Serial.print("Device responded, but firmware version is not recognised: 0x");
     print_hex2(version);
     Serial.println();
+    startup_blocked = true;
     return;
   }
 
@@ -1861,8 +2261,15 @@ void setup()
 // Loop
 // =====================================================
 
-void loop()
+void up_to_line_following_app_loop()
 {
+  if (startup_blocked) {
+    stopMotors();
+    Red();
+    delay(25);
+    return;
+  }
+
   serviceServoPulses();
   update_turn_angle();
 
@@ -1944,6 +2351,18 @@ void loop()
     Green();
     stopMotors();
     delay(500);
+    return;
+  }
+
+  if (ENABLE_OPEN_FIELD_TEST4) {
+    Red();
+
+    if (!open_field_test4_done && !open_field_test4_running) {
+      runOpenFieldTest4();
+    } else {
+      stopMotors();
+    }
+
     return;
   }
 
