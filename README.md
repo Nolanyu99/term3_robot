@@ -57,6 +57,7 @@ The table below documents the connections used by the final implementation.
 | Stop button | pin `33`, active low |
 | Revive button | pin `13`, active low |
 | Ultrasonic sensor reserved pins | trigger `52`, echo `53` |
+| Side ultrasonic sensor reserved pins | trigger `47`, echo `46` |
 
 Before connecting motor power, verify the Motoron `VIN`, `GND`, `M1A/M1B`,
 and `M2A/M2B` wiring. USB power does not replace the Motoron motor supply.
