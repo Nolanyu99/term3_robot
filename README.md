@@ -203,7 +203,7 @@ flowchart TD
 | [`src/up_to_line_following_app.cpp`](src/up_to_line_following_app.cpp) | Final integrated demonstration implementation |
 | [`src/main.cpp`](src/main.cpp) | Compile-time `APP_MODE` dispatcher |
 | [`include/`](include) | Shared headers and earlier Arduino prototype sketches |
-| [`scripts/`](scripts) | PlatformIO upload helpers and monitoring utilities |
+| [`Old/scripts/`](Old/scripts) | Archived PlatformIO upload helpers and monitoring utilities |
 | [`electronics/`](electronics) | Electronics notes |
 | [`docs/datasheet/`](docs/datasheet) | Component datasheets |
 | [`docs/planning/`](docs/planning) | Design sketches and planning material |
