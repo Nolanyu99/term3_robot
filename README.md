@@ -209,7 +209,7 @@ flowchart TD
 | [`docs/planning/`](docs/planning) | Design sketches and planning material |
 | [`docs/test_logs/`](docs/test_logs) | Recorded test results |
 | [`cad/`](cad) | Mechanical CAD files and exports |
-| [`waveform_figures_fixed/`](waveform_figures_fixed) | Signal-path and waveform figures |
+| [`Old/waveform_figures_fixed/`](Old/waveform_figures_fixed) | Archived signal-path and waveform figures |
 
 ## Useful Diagnostic Builds
 
