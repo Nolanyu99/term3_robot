@@ -13,8 +13,17 @@ enum class FollowState {
     LostLine,
 };
 
+enum class StartupPhase {
+    WaitingBeforeCalibration,
+    Calibrating,
+    WaitingBeforeRun,
+    Ready,
+};
+
 constexpr unsigned long SERIAL_WAIT_TIMEOUT_MS = 3000;
+constexpr unsigned long PRE_CALIBRATION_WAIT_MS = 2000;
 constexpr unsigned long CALIBRATION_TIME_MS = 5000;
+constexpr unsigned long POST_CALIBRATION_WAIT_MS = 3000;
 constexpr unsigned long CONTROL_INTERVAL_MS = 30;
 constexpr unsigned long STATUS_INTERVAL_MS = 250;
 constexpr unsigned long INTERSECTION_CROSS_MS = 500;
@@ -49,14 +58,14 @@ uint16_t max_values[SENSOR_COUNT] = {};
 uint16_t calibrated_values[SENSOR_COUNT] = {};
 
 FollowState follow_state = FollowState::Idle;
-unsigned long calibration_start_ms = 0;
+StartupPhase startup_phase = StartupPhase::WaitingBeforeCalibration;
+unsigned long startup_phase_start_ms = 0;
 unsigned long state_start_ms = 0;
 unsigned long last_control_ms = 0;
 unsigned long last_status_ms = 0;
 int32_t last_error = 0;
 int16_t last_left_command = 0;
 int16_t last_right_command = 0;
-bool calibration_done = false;
 bool line_detected = false;
 bool motoron_ready = false;
 bool run_enabled = false;
@@ -375,7 +384,7 @@ void print_calibration() {
     Serial.print(' ');
     print_array("max", max_values);
     Serial.println();
-    Serial.println("Send g=start line following, x=stop.");
+    Serial.println("Waiting 3 seconds before automatic line following.");
 }
 
 void process_serial_commands() {
@@ -405,7 +414,7 @@ void line_follow_test_app_setup() {
 
     Serial.println();
     Serial.println("=== GIGA R1 IR + Simple Motoron line follow test ===");
-    Serial.println("Lift wheels while checking motor direction. Move sensors over floor/line for 5s.");
+    Serial.println("Wait 2s, move sensors over floor/line for 5s, then wait 3s for automatic start.");
     Serial.println("Pins: S1=D2 S2=D3 S3=D4 S4=D5 S5=D8 S6=D9 S7=D10 S8=D11 S9=D12");
     Serial.print("base=");
     Serial.print(BASE_SPEED);
@@ -413,10 +422,12 @@ void line_follow_test_app_setup() {
     Serial.println(LINE_KP, 4);
 
     reset_calibration();
-    calibration_start_ms = millis();
+    startup_phase = StartupPhase::WaitingBeforeCalibration;
+    startup_phase_start_ms = millis();
     last_control_ms = millis();
     last_status_ms = millis();
     begin_motoron();
+    Serial.println("startup=waiting_before_calibration");
 }
 
 void line_follow_test_app_loop() {
@@ -424,12 +435,35 @@ void line_follow_test_app_loop() {
     read_rc_discharge_times();
 
     const unsigned long now_ms = millis();
-    if (!calibration_done) {
+
+    if (startup_phase == StartupPhase::WaitingBeforeCalibration) {
+        stop_motors();
+        if (now_ms - startup_phase_start_ms >= PRE_CALIBRATION_WAIT_MS) {
+            startup_phase = StartupPhase::Calibrating;
+            startup_phase_start_ms = now_ms;
+            Serial.println("startup=calibrating_ir");
+        }
+        return;
+    }
+
+    if (startup_phase == StartupPhase::Calibrating) {
         update_calibration();
         stop_motors();
-        if (now_ms - calibration_start_ms >= CALIBRATION_TIME_MS) {
-            calibration_done = true;
+        if (now_ms - startup_phase_start_ms >= CALIBRATION_TIME_MS) {
+            startup_phase = StartupPhase::WaitingBeforeRun;
+            startup_phase_start_ms = now_ms;
             print_calibration();
+        }
+        return;
+    }
+
+    if (startup_phase == StartupPhase::WaitingBeforeRun) {
+        stop_motors();
+        if (now_ms - startup_phase_start_ms >= POST_CALIBRATION_WAIT_MS) {
+            startup_phase = StartupPhase::Ready;
+            run_enabled = true;
+            set_follow_state(FollowState::FollowLine);
+            Serial.println("line_follow=auto_start");
         }
         return;
     }
