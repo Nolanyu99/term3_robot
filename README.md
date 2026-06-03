@@ -10,23 +10,21 @@ The assessed integrated build is:
 
 | Item | Location |
 | --- | --- |
-| PlatformIO environment | `giga_r1_m7_up_to_line_following_test` |
-| Main implementation | [`src/up_to_line_following_app.cpp`](src/up_to_line_following_app.cpp) |
-| Application selector | [`src/main.cpp`](src/main.cpp) using `APP_MODE=20` |
+| Final version | `jason_wall_following_main` |
+| PlatformIO environment | `giga_r1_m7_robot` |
+| Main implementation | [`src/robot_app.cpp`](src/robot_app.cpp) |
+| Integrated source logic | [`Programming_Viva/`](Programming_Viva) |
+| Application selector | [`src/main.cpp`](src/main.cpp) using `APP_MODE=0` |
 | Build configuration | [`platformio.ini`](platformio.ini) |
 
-The current configuration has `ENABLE_OPEN_FIELD_TEST4 = true`. After startup
-calibration, the robot runs the Test 4 open-field dead-reckoning manoeuvre once
-and then stops:
+`jason_wall_following_main` is the Easy difficulty autonomous build. After
+startup calibration, the robot follows the base line to the `B` RFID tag,
+requests Airlock B, wall-follows through the tunnel, enters the arena, scans
+RFID tags, asks the server whether each tag is fertile, and plants up to five
+seeds only on fertile locations.
 
-```text
-forward 2 nodes -> right 90 degrees -> forward 1 node
--> left 90 degrees -> forward 2 nodes -> stop
-```
-
-Set `ENABLE_OPEN_FIELD_TEST4` to `false` in
-[`src/up_to_line_following_app.cpp`](src/up_to_line_following_app.cpp) to run
-the line-following and RFID-triggered seed-dispensing behaviour instead.
+Easy difficulty does not require emergency-return behaviour, light seeking, or
+hard-mode obstacle/ramp handling.
 
 ## Setup
 
@@ -69,13 +67,13 @@ Open a terminal in the repository root.
 Build the final demonstration firmware:
 
 ```powershell
-platformio run -e giga_r1_m7_up_to_line_following_test
+platformio run -e giga_r1_m7_robot
 ```
 
 Upload it:
 
 ```powershell
-platformio run -e giga_r1_m7_up_to_line_following_test -t upload
+platformio run -e giga_r1_m7_robot -t upload
 ```
 
 The upload helper waits for DFU mode. If prompted, double-tap the Arduino GIGA
@@ -87,37 +85,46 @@ Open the serial monitor:
 platformio device monitor -b 115200
 ```
 
-For the current Test 4 build:
+For the `jason_wall_following_main` build:
 
-1. Place the robot at the start position with the correct initial heading.
+1. Place the robot at the base start position with the correct initial heading.
 2. During the first five seconds, move the IR array over both the floor and a
    line so the sensors can calibrate.
 3. When the LED turns yellow, place the robot flat and keep it still while the
    IMU gyro bias is calibrated.
-4. The robot then performs the three-leg manoeuvre once and stops.
-5. Press the stop button at any time to abort motion.
+4. The robot automatically starts the Easy flow: base line following, tunnel
+   wall following, then arena RFID planting.
+5. Press the stop button at any time to pause motion; press it again to resume.
+
+Serial controls:
+
+| Command | Action |
+| --- | --- |
+| `0` or `x` | Pause/resume the Easy flow |
+| `r` | Restart the Easy flow from the base-line stage |
+| `d` | Manually dispense one seed |
 
 ## Software Overview
 
 ```mermaid
 flowchart LR
-    ENV["PlatformIO env<br/>APP_MODE=20"] --> DISPATCH["src/main.cpp<br/>application selector"]
-    DISPATCH --> APP["up_to_line_following_app.cpp"]
+    ENV["PlatformIO env<br/>APP_MODE=0"] --> DISPATCH["src/main.cpp<br/>application selector"]
+    DISPATCH --> APP["src/robot_app.cpp<br/>jason_wall_following_main"]
 
     APP --> STARTUP["Startup calibration<br/>IR + IMU"]
-    APP --> MODE{"ENABLE_OPEN_FIELD_TEST4"}
-    MODE -->|true| TEST4["Test 4 dead reckoning"]
-    MODE -->|false| LINE["Line following + RFID planting"]
+    APP --> BASE["Base line following<br/>to B RFID tag"]
+    BASE --> AIRLOCK["Request Airlock B<br/>over MQTT"]
+    AIRLOCK --> TUNNEL["Tunnel wall following"]
+    TUNNEL --> ARENA["Arena line following<br/>RFID fertile checks"]
+    ARENA --> DISPENSER["Two-servo seed dispenser"]
 
-    ENCODERS["Wheel encoders"] --> TEST4
-    RFID["RFID reader"] --> TEST4
-    IMU["IMU gyro"] --> TEST4
-    TEST4 --> MOTOR["Motoron M3S550"]
-
-    QTR["9-channel QTR RC array"] --> LINE
-    RFID --> LINE
-    LINE --> MOTOR
-    LINE --> DISPENSER["Two-servo seed dispenser"]
+    QTR["9-channel QTR RC array"] --> BASE
+    QTR --> ARENA
+    RFID["RFID reader"] --> BASE
+    RFID --> ARENA
+    ULTRA["Forward + side ultrasonic sensors"] --> TUNNEL
+    IMU["IMU gyro"] --> APP
+    APP --> MOTOR["Motoron M3S550"]
 
     BUTTONS["Stop and revive buttons"] --> APP
     APP --> LED["RGB status LED"]
@@ -137,47 +144,37 @@ flowchart TD
     H --> I["Robot ready"]
 ```
 
-### Test 4 Open-Field Flow
+### Easy Difficulty Flow
 
 ```mermaid
 flowchart TD
-    A["Robot ready"] --> B["Drive forward 2 RFID nodes"]
-    B --> C["Turn right 90 degrees using IMU gyro"]
-    C --> D["Drive forward 1 RFID node"]
-    D --> E["Turn left 90 degrees using IMU gyro"]
-    E --> F["Drive forward 2 RFID nodes"]
-    F --> G["Stop motors and report result"]
+    A["Robot ready"] --> B["Follow base line"]
+    B --> C["Read B RFID tag"]
+    C --> D["Send openAirlock B request"]
+    D --> E["Wait for base gate and enter tunnel"]
+    E --> F["Wall-follow through tunnel"]
+    F --> G["Enter arena"]
+    G --> H["Follow arena lines and scan RFID tags"]
+    H --> I{"Server says fertile?"}
+    I -->|yes| J["Centre and plant one seed"]
+    I -->|no| H
+    J --> K{"Seeds left?"}
+    K -->|yes| H
+    K -->|no| L["Stop and show green LED"]
 
-    H["Stop button"] --> I["Abort and stop motors"]
-    B -.-> H
-    C -.-> H
-    D -.-> H
-    E -.-> H
-    F -.-> H
+    M["Stop button or serial 0/x"] --> N["Pause motors"]
+    B -.-> M
+    E -.-> M
+    F -.-> M
+    H -.-> M
 ```
 
-Each straight leg uses wheel-encoder feedback. The controller compares the
-absolute left and right encoder increments and adjusts the two wheel commands
-to reduce drift. RFID tags provide node-level position checks. After a tag is
-read, the robot advances a short calibrated distance so its centre aligns with
-the node. Each turn integrates the IMU gyroscope Z-axis rate until the target
-angle is reached.
-
-The main Test 4 tuning constants are grouped near `ENABLE_OPEN_FIELD_TEST4` in
-[`src/up_to_line_following_app.cpp`](src/up_to_line_following_app.cpp):
-
-| Parameter | Current value | Purpose |
-| --- | ---: | --- |
-| `OPEN_FIELD_COUNTS_PER_NODE` | `2400` | Encoder counts expected per arena node |
-| `OPEN_FIELD_BASE_SPEED` | `160` | Straight-line motor command |
-| `OPEN_FIELD_ENCODER_KP` | `0.08` | Left/right encoder correction gain |
-| `OPEN_FIELD_HEADING_KP` | `0.0` | Optional IMU heading correction during straight legs |
-| `TURN_90_TARGET_DEG` | `90.0` | IMU turn target |
+The Easy flow reuses the `Programming_Viva` modules for line following, IMU
+turning, RFID, MQTT messages, tunnel wall following, and seed dispensing. The
+PlatformIO wrapper in [`src/robot_app.cpp`](src/robot_app.cpp) makes that logic
+the default `APP_MODE=0` application.
 
 ### Line-Following Flow
-
-This behaviour is implemented but bypassed while `ENABLE_OPEN_FIELD_TEST4` is
-`true`.
 
 ```mermaid
 flowchart TD
@@ -201,8 +198,9 @@ flowchart TD
 | Path | Purpose |
 | --- | --- |
 | [`src/`](src) | Integrated application and focused hardware test applications |
-| [`src/up_to_line_following_app.cpp`](src/up_to_line_following_app.cpp) | Final integrated demonstration implementation |
+| [`src/robot_app.cpp`](src/robot_app.cpp) | Final `jason_wall_following_main` Easy difficulty implementation |
 | [`src/main.cpp`](src/main.cpp) | Compile-time `APP_MODE` dispatcher |
+| [`Programming_Viva/`](Programming_Viva) | Integrated Arduino modules reused by the final build |
 | [`include/`](include) | Shared headers and earlier Arduino prototype sketches |
 | [`Old/scripts/`](Old/scripts) | Archived PlatformIO upload helpers and monitoring utilities |
 | [`electronics/`](electronics) | Electronics notes |
@@ -236,15 +234,16 @@ platformio run -e <environment_name>
 
 ## Calibration Notes
 
-The open-field parameters are empirical and must be checked after mechanical,
-wiring, wheel, or battery changes. Commission the robot incrementally:
+The line-following, tunnel, and turning parameters are empirical and must be
+checked after mechanical, wiring, wheel, or battery changes. Commission the
+robot incrementally:
 
 1. Confirm each motor direction and encoder direction with
    `giga_r1_m7_individual_wheel_test`.
-2. Measure the encoder counts for one arena node and update
-   `OPEN_FIELD_COUNTS_PER_NODE`.
-3. Tune `OPEN_FIELD_ENCODER_KP` until a straight leg is stable without visible
-   oscillation.
-4. Confirm RFID detection and adjust the centre-after-RFID distance if needed.
-5. Test left and right 90-degree IMU turns independently.
-6. Run the full three-leg Test 4 manoeuvre.
+2. Test the QTR/IR array and tune thresholds if line detection is unstable.
+3. Confirm RFID detection at the base `B` tag and arena tags.
+4. Test left and right 90-degree IMU turns independently.
+5. Test tunnel forward and side ultrasonic readings before driving through the
+   airlock.
+6. Run the full `jason_wall_following_main` Easy flow with the robot watched
+   closely and the stop button reachable.
