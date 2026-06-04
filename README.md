@@ -1,249 +1,269 @@
 # Term 3 Autonomous Robot
 
-Arduino GIGA R1 firmware for a differential-drive arena robot. The repository
-contains the integrated robot software, focused hardware diagnostics, hardware
-datasheets, planning material, and test logs.
+This repository contains the software, documentation, diagrams, and testing evidence for our Term 3 autonomous robot project.
 
-## Final Demonstration Build
+The robot is an Arduino GIGA R1 based differential-drive robot designed for the robotics challenge. The software integrates line following, IMU-based turning, RFID reading, server communication, obstacle avoidance, tunnel/airlock handling, emergency stop behaviour, and seed dispensing.
 
-The assessed integrated build is:
+---
 
-| Item | Location |
-| --- | --- |
-| Final version | `jason_wall_following_main` |
-| PlatformIO environment | `giga_r1_m7_robot` |
-| Main implementation | [`src/robot_app.cpp`](src/robot_app.cpp) |
-| Integrated source logic | [`Programming_Viva/`](Programming_Viva) |
-| Application selector | [`src/main.cpp`](src/main.cpp) using `APP_MODE=0` |
-| Build configuration | [`platformio.ini`](platformio.ini) |
+## Final Viva/Test Run Version
 
-`jason_wall_following_main` is the Easy difficulty autonomous build. After
-startup calibration, the robot follows the base line to the `B` RFID tag,
-requests Airlock B, wall-follows through the tunnel, enters the arena, scans
-RFID tags, asks the server whether each tag is fertile, and plants up to five
-seeds only on fertile locations.
+The final code version used for the viva/test run is:
 
-Easy difficulty does not require emergency-return behaviour, light seeking, or
-hard-mode obstacle/ramp handling.
+```text
+Jason_combined_code/
 
-## Setup
+The main file for the final integrated version is:
 
-### Requirements
+Jason_combined_code/Main.ino
 
-- Arduino GIGA R1 WiFi, using the M7 core
-- PlatformIO Core or the PlatformIO VS Code extension
-- USB cable for upload and serial monitoring
-- A correctly wired Motoron M3S550 motor controller and separate motor supply
-- Robot wheels raised off the floor for the first motor test after wiring changes
+This folder is treated as the final assessed software version for the viva/test run.
 
-PlatformIO installs the required Arduino libraries from [`platformio.ini`](platformio.ini)
-when the project is built.
+The Jason_combined_code folder contains the combined Arduino .ino files for the full robot behaviour, including:
 
-### Important Connections
+File	Purpose
+Main.ino	Main setup, loop, mission state machine, startup calibration, and high-level robot control
+ArenaPathfinding.ino	Arena pathfinding and navigation logic
+ArenaTypes.h	Shared arena data structures and types
+IMU.ino	IMU setup, gyro calibration, and turn-angle tracking
+LineSensors.ino	9-channel line sensor reading, calibration, line following, and junction detection
+MotorEncoders.ino	Motor encoder counting and distance/position feedback
+RobotBehaviour.ino	General robot behaviour functions
+ObstacleAvoid.ino	Obstacle avoidance behaviour and swerve sequence
+RFID.ino	RFID reader setup and tag handling
+RFIDServerTest.ino	RFID-to-server test routine
+Messages.ino	WiFi/MQTT/server communication logic
+Servos.ino	Seed dispenser servo control
+LEDs.ino	RGB LED status functions
+Printing.ino	Serial debugging and status print functions
+Turning.ino	IMU-based turning functions
+Test8.ino	Revival mission / Test 8 behaviour
+Repository Structure
+term3_robot/
+├── Jason_combined_code/       Final viva/test run code
+├── Jason_wall_following_main/ Earlier wall-following version
+├── Main/                      Earlier or alternative main code
+├── Programming_Viva/          Earlier viva/programming modules
+├── Test3/                     Test code
+├── Test8/                     Test 8 / revival related code
+├── Old/                       Archived code and older versions
+├── cad/                       CAD and mechanical design files
+├── docs/                      Documentation, planning, datasheets, and test logs
+├── include/                   Header files and shared definitions
+├── src/                       PlatformIO source files and earlier application structure
+├── platformio.ini             PlatformIO build configuration
+├── RacetrackLineFollower.ino  Earlier line-following test code
+└── README.md                  Repository guide
+Hardware Platform
 
-The table below documents the connections used by the final implementation.
+The robot uses the following main hardware components:
 
-| Device | Connection |
-| --- | --- |
-| Motoron M3S550 | `Wire1`; left motor channel `1`, right motor channel `2` |
-| Left wheel encoder | `A=28`, `B=26` |
-| Right wheel encoder | `A=22`, `B=24` |
-| QTR RC line sensors | pins `2, 3, 4, 5, 8, 9, 10, 11, 12` |
-| RFID reader | `Wire1`, address `0x28` |
-| Upper and lower dispenser servos | pins `36`, `38` |
-| RGB status LED | red `39`, green `35`, blue `37` |
-| Stop button | pin `33`, active low |
-| Revive button | pin `13`, active low |
-| Ultrasonic sensor reserved pins | trigger `52`, echo `53` |
-| Side ultrasonic sensor reserved pins | trigger `47`, echo `46` |
+Component	Purpose
+Arduino GIGA R1 WiFi	Main microcontroller
+Motoron motor controller	Drives the left and right DC motors
+DC motors with encoders	Differential-drive movement and encoder feedback
+9-channel QTR/IR sensor array	Line following and junction detection
+IMU	Gyro-based turning and heading estimation
+RFID reader	Reads arena/base RFID tags
+Ultrasonic sensors	Tunnel and wall-following distance sensing
+Two servos	Seed dispenser mechanism
+RGB LED	Robot status indication
+Mechanical stop button	Pause / kill-switch behaviour
+Revive button	Revival behaviour trigger
+Required Libraries
 
-Before connecting motor power, verify the Motoron `VIN`, `GND`, `M1A/M1B`,
-and `M2A/M2B` wiring. USB power does not replace the Motoron motor supply.
+The final Arduino code uses the following main libraries:
 
-## Build, Upload, and Run
+#include <Arduino.h>
+#include <Wire.h>
+#include <Motoron.h>
+#include <math.h>
+#include <MFRC522_I2C.h>
 
-Open a terminal in the repository root.
+Required external libraries:
 
-Build the final demonstration firmware:
+Library	Purpose
+Motoron	Communication with the Motoron motor controller
+MFRC522_I2C	RFID reader communication over I2C
+Wire	I2C communication
+Arduino core libraries	General Arduino GIGA R1 functions
 
-```powershell
-platformio run -e giga_r1_m7_robot
-```
+Before compiling, make sure these libraries are installed in Arduino IDE or PlatformIO.
 
-Upload it:
+Setup Steps
+1. Clone or Download the Repository
+git clone <repository-url>
 
-```powershell
-platformio run -e giga_r1_m7_robot -t upload
-```
+Open the repository folder on your computer.
 
-The upload helper waits for DFU mode. If prompted, double-tap the Arduino GIGA
-`RESET` button until the `BOOT0` LED is green.
+2. Open the Final Code
 
-Open the serial monitor:
+Open the following file in Arduino IDE:
 
-```powershell
-platformio device monitor -b 115200
-```
+Jason_combined_code/Main.ino
 
-For the `jason_wall_following_main` build:
+Arduino IDE should automatically load the other .ino files in the same folder as tabs.
 
-1. Place the robot at the base start position with the correct initial heading.
-2. During the first five seconds, move the IR array over both the floor and a
-   line so the sensors can calibrate.
-3. When the LED turns yellow, place the robot flat and keep it still while the
-   IMU gyro bias is calibrated.
-4. The robot automatically starts the Easy flow: base line following, tunnel
-   wall following, then arena RFID planting.
-5. Press the stop button at any time to pause motion; press it again to resume.
+The final code depends on all files inside:
 
-Serial controls:
+Jason_combined_code/
 
-| Command | Action |
-| --- | --- |
-| `0` or `x` | Pause/resume the Easy flow |
-| `r` | Restart the Easy flow from the base-line stage |
-| `d` | Manually dispense one seed |
+Do not upload only Main.ino by itself without the other files in the same folder.
 
-## Software Overview
+3. Select Board and Port
 
-```mermaid
-flowchart LR
-    ENV["PlatformIO env<br/>APP_MODE=0"] --> DISPATCH["src/main.cpp<br/>application selector"]
-    DISPATCH --> APP["src/robot_app.cpp<br/>jason_wall_following_main"]
+In Arduino IDE:
 
-    APP --> STARTUP["Startup calibration<br/>IR + IMU"]
-    APP --> BASE["Base line following<br/>to B RFID tag"]
-    BASE --> AIRLOCK["Request Airlock B<br/>over MQTT"]
-    AIRLOCK --> TUNNEL["Tunnel wall following"]
-    TUNNEL --> ARENA["Arena line following<br/>RFID fertile checks"]
-    ARENA --> DISPENSER["Two-servo seed dispenser"]
+Board: Arduino GIGA R1 WiFi
+Port: Select the connected Arduino port
 
-    QTR["9-channel QTR RC array"] --> BASE
-    QTR --> ARENA
-    RFID["RFID reader"] --> BASE
-    RFID --> ARENA
-    ULTRA["Forward + side ultrasonic sensors"] --> TUNNEL
-    IMU["IMU gyro"] --> APP
-    APP --> MOTOR["Motoron M3S550"]
+Use the M7 core if the IDE asks for the target core.
 
-    BUTTONS["Stop and revive buttons"] --> APP
-    APP --> LED["RGB status LED"]
-```
+4. Install Required Libraries
 
-### Startup Flow
+Install these libraries through Arduino Library Manager or manually:
 
-```mermaid
-flowchart TD
-    A["Power on / reset"] --> B["Initialise Motoron and IMU"]
-    B --> C["Initialise encoders, buttons, LED, RFID, and servos"]
-    C --> D{"RFID reader found<br/>at 0x28?"}
-    D -->|no| E["Print wiring error and do not start the run"]
-    D -->|yes| F["Calibrate IR sensors for 5 seconds"]
-    F --> G["Yellow LED: keep robot flat and still for 3 seconds"]
-    G --> H["Calibrate gyro Z-axis bias"]
-    H --> I["Robot ready"]
-```
+Motoron
+MFRC522_I2C
 
-### Easy Difficulty Flow
+The built-in Arduino libraries such as Wire and Arduino.h should already be available.
 
-```mermaid
-flowchart TD
-    A["Robot ready"] --> B["Follow base line"]
-    B --> C["Read B RFID tag"]
-    C --> D["Send openAirlock B request"]
-    D --> E["Wait for base gate and enter tunnel"]
-    E --> F["Wall-follow through tunnel"]
-    F --> G["Enter arena"]
-    G --> H["Follow arena lines and scan RFID tags"]
-    H --> I{"Server says fertile?"}
-    I -->|yes| J["Centre and plant one seed"]
-    I -->|no| H
-    J --> K{"Seeds left?"}
-    K -->|yes| H
-    K -->|no| L["Stop and show green LED"]
+5. Check WiFi / Server Settings
 
-    M["Stop button or serial 0/x"] --> N["Pause motors"]
-    B -.-> M
-    E -.-> M
-    F -.-> M
-    H -.-> M
-```
+The code contains WiFi and server communication settings for the robotics challenge environment.
 
-The Easy flow reuses the `Programming_Viva` modules for line following, IMU
-turning, RFID, MQTT messages, tunnel wall following, and seed dispensing. The
-PlatformIO wrapper in [`src/robot_app.cpp`](src/robot_app.cpp) makes that logic
-the default `APP_MODE=0` application.
+Before uploading, check the WiFi SSID, WiFi password, UDP/MQTT/server settings, and RFID/server communication settings.
 
-### Line-Following Flow
+For security, real WiFi credentials should not be shared in a public repository. If the repository is public, replace private credentials with placeholders such as:
 
-```mermaid
-flowchart TD
-    A["Read and calibrate QTR RC sensors"] --> B{"Line found?"}
-    B -->|no| C["Move forward briefly, then rotate toward last error"]
-    B -->|yes| D{"Junction detected?"}
-    D -->|no| E["Estimate line position and apply proportional steering"]
-    D -->|left or right corner| F["Turn until centred on the new line"]
-    D -->|T or wide intersection| G["Apply configured junction decision"]
-    E --> H{"RFID tag detected?"}
-    F --> A
-    G --> A
-    C --> A
-    H -->|no| A
-    H -->|yes| I["Centre robot, dispense one seed, resume"]
-    I --> A
-```
+constexpr const char* WIFI_SSID = "YOUR_WIFI_SSID";
+constexpr const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
+6. Upload the Code
 
-## Repository Structure
+Connect the Arduino GIGA R1 to the computer with a USB cable.
 
-| Path | Purpose |
-| --- | --- |
-| [`src/`](src) | Integrated application and focused hardware test applications |
-| [`src/robot_app.cpp`](src/robot_app.cpp) | Final `jason_wall_following_main` Easy difficulty implementation |
-| [`src/main.cpp`](src/main.cpp) | Compile-time `APP_MODE` dispatcher |
-| [`Programming_Viva/`](Programming_Viva) | Integrated Arduino modules reused by the final build |
-| [`include/`](include) | Shared headers and earlier Arduino prototype sketches |
-| [`Old/scripts/`](Old/scripts) | Archived PlatformIO upload helpers and monitoring utilities |
-| [`electronics/`](electronics) | Electronics notes |
-| [`docs/datasheet/`](docs/datasheet) | Component datasheets |
-| [`docs/planning/`](docs/planning) | Design sketches and planning material |
-| [`docs/test_logs/`](docs/test_logs) | Recorded test results |
-| [`cad/`](cad) | Mechanical CAD files and exports |
-| [`Old/waveform_figures_fixed/`](Old/waveform_figures_fixed) | Archived signal-path and waveform figures |
+In Arduino IDE:
 
-## Useful Diagnostic Builds
+Click Upload
 
-Use focused environments while commissioning hardware. Start with the wheels
-raised whenever a build can drive the motors.
+After uploading, open Serial Monitor at:
 
-| Environment | Purpose |
-| --- | --- |
-| `giga_r1_m7_arduino_test` | Arduino USB, serial, LED, and analogue-input smoke test |
-| `giga_r1_m7_motor_test` | Motoron I2C scan and motor-controller diagnostics |
-| `giga_r1_m7_individual_wheel_test` | Run one wheel at a time in both directions and print encoder counts |
-| `giga_r1_m7_encoder_test` | Encoder-only diagnostics |
-| `giga_r1_m7_qtr_test` | QTR sensor test |
-| `giga_r1_m7_rfid_test` | RFID bus and reader test |
-| `giga_r1_m7_servo_test` | Seed-dispenser servo test |
-| `giga_r1_m7_imu_test` | IMU detection, calibration, and turn diagnostics |
+115200 baud
+How to Run the Robot
+Place the robot at the correct starting position.
+Turn on the robot power system.
+Connect the Arduino GIGA R1 to the computer if Serial Monitor is needed.
+Upload the final code from Jason_combined_code/.
+Open Serial Monitor at 115200.
+During startup, the robot runs calibration:
+IR sensor calibration
+IMU stillness wait
+Gyro Z-axis bias calibration
+After calibration, the robot enters its mission state machine.
+The robot can perform behaviours such as:
+base line following
+tunnel entry
+wall following
+arena behaviour
+RFID scanning
+obstacle avoidance
+seed dispensing
+return-to-base sequence
+emergency stop / pause behaviour
+Serial Controls
 
-Build any diagnostic environment with:
+The final integrated code includes serial commands for testing and selecting behaviours.
 
-```powershell
-platformio run -e <environment_name>
-```
+Command	Action
+0	Toggle running / paused state
+9	Run RFID server test
+8	Reset and select obstacle avoidance sequence
+4	Trigger return-to-base sequence
+7	Run Test 8 / revival mission
+Main Software Overview
 
-## Calibration Notes
+The final version is organised around a mission-level state machine in Main.ino.
 
-The line-following, tunnel, and turning parameters are empirical and must be
-checked after mechanical, wiring, wheel, or battery changes. Commission the
-robot incrementally:
+Main Software Components
+Startup and Calibration Flow
+Line Following Flow
+Obstacle Avoidance Flow
+Tunnel / Wall Following Flow
+RFID / Planting Flow
+Emergency Stop / Kill Switch Flow
+Return-to-Base Flow
+Testing and Calibration Evidence
 
-1. Confirm each motor direction and encoder direction with
-   `giga_r1_m7_individual_wheel_test`.
-2. Test the QTR/IR array and tune thresholds if line detection is unstable.
-3. Confirm RFID detection at the base `B` tag and arena tags.
-4. Test left and right 90-degree IMU turns independently.
-5. Test tunnel forward and side ultrasonic readings before driving through the
-   airlock.
-6. Run the full `jason_wall_following_main` Easy flow with the robot watched
-   closely and the stop button reachable.
+Testing evidence is stored in the documentation folders and may include notes, screenshots, logs, and test results.
+
+Recommended evidence to include in docs/test_logs/:
+
+docs/test_logs/
+├── imu_calibration_log.md
+├── line_following_test_log.md
+├── motor_encoder_test_log.md
+├── rfid_server_test_log.md
+├── obstacle_avoidance_test_log.md
+├── tunnel_wall_following_test_log.md
+├── seed_dispenser_test_log.md
+└── final_viva_test_log.md
+
+Each test log should include:
+
+Date:
+Test name:
+Code version:
+Hardware setup:
+Parameters used:
+What worked:
+What did not work:
+Changes made:
+Final result:
+
+Example:
+
+Test name: RFID server test
+Code version: Jason_combined_code
+Result: RFID tag was detected and the robot sent the tag information to the server.
+What worked: RFID UID reading and serial output.
+What did not work: Server response was inconsistent during some runs.
+Change made: Added cooldown time between RFID scans.
+Calibration Notes
+
+The robot requires calibration before reliable operation.
+
+Main calibration steps:
+
+IR line sensors:
+Move the sensor array over both the floor and the black line during startup.
+The calibration lasts around 5 seconds.
+This improves line detection and junction classification.
+IMU gyro:
+Place the robot flat and still when the yellow LED is shown.
+The robot measures gyro Z-axis bias.
+This improves turning accuracy.
+Ultrasonic sensors:
+Check forward and side distance readings before tunnel tests.
+Verify that the wall-following distance threshold is suitable.
+Motor direction:
+Test left and right motors separately after wiring changes.
+Keep the wheels raised during the first motor test.
+RFID:
+Confirm that the RFID reader can detect known tags.
+Check that RFID readings are sent correctly to the server.
+Seed dispenser:
+Test upper and lower servo angles before loading seeds.
+Confirm that only one seed is released per planting cycle.
+Known Limitations
+
+The final integrated code combines several behaviours into one Arduino project. Some modules were tested more heavily than others.
+
+Known limitations:
+
+Fine movement may vary depending on battery level, floor friction, and wheel alignment.
+Line following can become unstable if the lighting changes or if the line sensor calibration is poor.
+RFID detection depends on tag position and reader distance.
+Ultrasonic readings can fluctuate near walls, corners, or angled surfaces.
+Obstacle avoidance and pathfinding may require manual reset if the robot starts from an unexpected pose.
+WiFi/server communication depends on the challenge network and server availability.
+Some older folders in the repository are archived prototypes and should not be treated as the final assessed version.
