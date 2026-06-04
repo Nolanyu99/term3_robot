@@ -808,71 +808,11 @@ Stop inputs are checked in the main loop and inside some blocking test routines 
 
 ## Testing and Calibration Evidence
 
-Testing evidence should be stored in the documentation folders and may include notes, logs, screenshots, serial monitor output, and short videos.
-
-Recommended folder:
-
-```text
-docs/test_logs/
-```
-
-Recommended logs:
+Testing and calibration evidence is stored in:
 
 ```text
 docs/test_logs/
 ├── final_viva_test_log.md
-├── imu_calibration_log.md
-├── line_following_test_log.md
-├── motor_encoder_test_log.md
-├── rfid_reader_test_log.md
-├── rfid_server_test_log.md
-├── mqtt_messages_test_log.md
-├── obstacle_avoidance_test_log.md
-├── tunnel_wall_following_test_log.md
-├── arena_pathfinding_test_log.md
-├── seed_dispenser_test_log.md
-└── test8_revive_test_log.md
-```
-
-Each test log should include:
-
-```text
-Date:
-Test name:
-Code version:
-Commit used:
-Hardware setup:
-Parameters used:
-What worked:
-What did not work:
-Changes made:
-Final result:
-```
-
-Example:
-
-```text
-Test name: RFID server test
-Code version: Jason_combined_code
-Serial command: 9
-
-Result:
-The RFID reader detected a tag and sent an isFertile request to the server.
-
-What worked:
-- UID reading
-- Server request
-- Serial output for UID and x/y
-
-What did not work:
-- Server reply was sometimes delayed
-
-Change made:
-- Added timeout handling and printed NO_REPLY when no response arrived
-
-Final result:
-RFID-server diagnostic worked when the server was online and the tag was close enough to the reader.
-```
 
 ---
 
