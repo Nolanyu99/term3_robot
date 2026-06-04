@@ -1,8 +1,8 @@
 # Term 3 Autonomous Robot
 
-This repository contains the software, documentation, diagrams, and testing evidence for our Term 3 autonomous robot project.
+This repository contains the software, documentation, diagrams, and testing evidence for our Term 3 robotics challenge robot.
 
-The robot is an Arduino GIGA R1 based differential-drive robot designed for the robotics challenge. The software integrates line following, IMU-based turning, RFID reading, server communication, obstacle avoidance, tunnel/airlock handling, emergency stop behaviour, and seed dispensing.
+The final integrated robot software is an Arduino GIGA R1 WiFi project. It combines line following, IMU-based turning, RFID reading, MQTT/server communication, ultrasonic wall following, obstacle avoidance, arena pathfinding, return-to-base logic, emergency stop behaviour, revive behaviour, and seed dispensing.
 
 ---
 
@@ -22,26 +22,35 @@ Jason_combined_code/Main.ino
 
 This folder is treated as the final assessed software version for the viva/test run.
 
-The `Jason_combined_code` folder contains the combined Arduino `.ino` files for the full robot behaviour, including:
+Important note:
 
-| File | Purpose |
-|---|---|
-| `Main.ino` | Main setup, loop, mission state machine, startup calibration, and high-level robot control |
-| `ArenaPathfinding.ino` | Arena pathfinding and navigation logic |
-| `ArenaTypes.h` | Shared arena data structures and types |
-| `IMU.ino` | IMU setup, gyro calibration, and turn-angle tracking |
-| `LineSensors.ino` | 9-channel line sensor reading, calibration, line following, and junction detection |
-| `MotorEncoders.ino` | Motor encoder counting and distance/position feedback |
-| `RobotBehaviour.ino` | General robot behaviour functions |
-| `ObstacleAvoid.ino` | Obstacle avoidance behaviour and swerve sequence |
-| `RFID.ino` | RFID reader setup and tag handling |
-| `RFIDServerTest.ino` | RFID-to-server test routine |
-| `Messages.ino` | WiFi/MQTT/server communication logic |
-| `Servos.ino` | Seed dispenser servo control |
-| `LEDs.ino` | RGB LED status functions |
-| `Printing.ino` | Serial debugging and status print functions |
-| `Turning.ino` | IMU-based turning functions |
-| `Test8.ino` | Revival mission / Test 8 behaviour |
+```text
+All `.ino` files inside Jason_combined_code/ are part of the same Arduino sketch.
+Do not upload Main.ino alone without the other tabs/files in the same folder.
+```
+
+---
+
+## Final Code Folder Contents
+
+| File                   | Purpose                                                                                                                                                                                                                                                                                                                              |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Main.ino`             | Main integrated sketch. Defines configuration values, mission phases, global states, hardware pin assignments, tunnel logic, setup routine, calibration sequence, serial commands, stop/revive button handling, and the main mission state machine.                                                                                  |
+| `ArenaTypes.h`         | Shared type definitions used by the arena and revive logic, including `ArenaPoint`, `ArenaHeading`, `RFIDLocation`, and `Test8ReviveTarget`.                                                                                                                                                                                         |
+| `ArenaPathfinding.ino` | Arena navigation and path planning. Uses an 11x11 planning grid around the 9x9 playable arena, decodes the 21-byte server map, uses weighted Dijkstra pathfinding, updates pose from RFID/server replies, marks temporary obstacles, and drives cell-by-cell toward a target.                                                        |
+| `Messages.ino`         | Non-blocking WiFi/MQTT communication layer. Handles WiFi reconnects, MQTT reconnects, topic building, incoming messages, map updates, fertility/location replies, revive broadcasts, emergency/disable messages, heartbeat/register messages, and server requests such as `isFertile`, `getMap`, `openAirlock`, and `reviveRequest`. |
+| `IMU.ino`              | IMU setup and gyro handling. Selects the best I2C bus, detects ADXL345, ITG320x, HMC5883L/QMC5883L, and BMP280, calibrates gyro Z-axis bias, integrates turn angle, and prints IMU status.                                                                                                                                           |
+| `LineSensors.ino`      | 9-channel RC/QTR line sensor reading and calibration. Handles line detection, line position estimation, junction classification, line following, intersection crossing, gap recovery, and lost-line recovery.                                                                                                                        |
+| `MotorEncoders.ino`    | Motor and encoder support. Handles left/right encoder interrupts, encoder reads, Motoron setup, motor speed commands, stop commands, forward driving, proportional line-following motor correction, and centring after RFID/IR detection.                                                                                            |
+| `ObstacleAvoid.ino`    | Obstacle swerve state machine. Uses the forward ultrasonic sensor, line following without automatic junction turns, RFID-based junction detection, and scripted right/left turn sequence to move around an obstacle and return to the original trajectory.                                                                           |
+| `RFID.ino`             | RFID reader setup and basic tag handling. Checks the RFID reader on I2C address `0x28`, validates firmware version, initialises the reader without soft reset, prints UID values, and triggers planting when a tag is detected in the simple RFID flow.                                                                              |
+| `RFIDServerTest.ino`   | Manual and autonomous RFID/server helper. Provides `tryScanRFIDOnce()`, `scanRFIDAndQueryServer()`, and `runRFIDServerTest()`. The serial command `9` uses this to scan an RFID tag, send `isFertile`, wait for a server reply, and print UID, fertility, and x/y position.                                                          |
+| `RobotBehaviour.ino`   | Higher-level helper functions. Provides `plant()`, stop-input checking during blocking tests, and RFID scanning for test routines. Some older scripted test flows were removed because the arena pathfinder and server-based planting logic replaced them.                                                                           |
+| `Servos.ino`           | Seed dispenser servo control. Converts angles to pulse widths, manually services servo pulses, closes both gates, and runs the upper/lower gate sequence to dispense one seed.                                                                                                                                                       |
+| `Test8.ino`            | Revive mission logic. Stores revive target broadcasts, selects a target, approaches using the forward ultrasonic sensor and line sensors if available, holds revive for 5 seconds, sends a revive request, then reverses until an RFID tag is found.                                                                                 |
+| `Turning.ino`          | IMU-based turning functions. Provides left/right 90-degree and 180-degree turns using gyro angle integration and line reacquisition, plus angle-only turning with timeout and stop-input checking.                                                                                                                                   |
+| `LEDs.ino`             | RGB LED helper functions for red, green, yellow, blue, and flashing red status indication.                                                                                                                                                                                                                                           |
+| `Printing.ino`         | Serial debug output. Prints line-following state, junction type, line position, motor commands, calibrated sensor values, IMU status, encoder counts, and calibration data.                                                                                                                                                          |
 
 ---
 
@@ -49,15 +58,15 @@ The `Jason_combined_code` folder contains the combined Arduino `.ino` files for 
 
 ```text
 term3_robot/
-├── Jason_combined_code/       Final viva/test run code
+├── Jason_combined_code/       Final viva/test run Arduino sketch
 ├── Jason_wall_following_main/ Earlier wall-following version
 ├── Main/                      Earlier or alternative main code
 ├── Programming_Viva/          Earlier viva/programming modules
-├── Test3/                     Test code
-├── Test8/                     Test 8 / revival related code
+├── Test3/                     Older test code
+├── Test8/                     Older or separate Test 8 code
 ├── Old/                       Archived code and older versions
-├── cad/                       CAD and mechanical design files
-├── docs/                      Documentation, planning, datasheets, and test logs
+├── cad/                       Mechanical CAD files and exports
+├── docs/                      Documentation, planning material, datasheets, and test logs
 ├── include/                   Header files and shared definitions
 ├── src/                       PlatformIO source files and earlier application structure
 ├── platformio.ini             PlatformIO build configuration
@@ -65,31 +74,61 @@ term3_robot/
 └── README.md                  Repository guide
 ```
 
+Only `Jason_combined_code/` should be treated as the final viva/test run version.
+
+Other folders are kept for reference, diagnostics, earlier prototypes, or development history.
+
 ---
 
 ## Hardware Platform
 
-The robot uses the following main hardware components:
+The final code is designed for an Arduino GIGA R1 WiFi based differential-drive robot.
 
-| Component | Purpose |
-|---|---|
-| Arduino GIGA R1 WiFi | Main microcontroller |
-| Motoron motor controller | Drives the left and right DC motors |
-| DC motors with encoders | Differential-drive movement and encoder feedback |
-| 9-channel QTR/IR sensor array | Line following and junction detection |
-| IMU | Gyro-based turning and heading estimation |
-| RFID reader | Reads arena/base RFID tags |
-| Ultrasonic sensors | Tunnel and wall-following distance sensing |
-| Two servos | Seed dispenser mechanism |
-| RGB LED | Robot status indication |
-| Mechanical stop button | Pause / kill-switch behaviour |
-| Revive button | Revival behaviour trigger |
+| Component                          | Purpose                                                                 |
+| ---------------------------------- | ----------------------------------------------------------------------- |
+| Arduino GIGA R1 WiFi               | Main microcontroller                                                    |
+| Motoron motor controller           | Controls the left and right drive motors                                |
+| DC motors with encoders            | Differential-drive movement and encoder feedback                        |
+| 9-channel RC/QTR line sensor array | Line following, line recovery, and junction detection                   |
+| IMU / gyro                         | Turn-angle estimation and IMU-based turning                             |
+| RFID reader                        | Reads arena/base RFID tags                                              |
+| Forward ultrasonic sensor          | Gate detection, obstacle detection, and revive approach distance        |
+| Side ultrasonic sensor             | Tunnel wall-following distance measurement                              |
+| Upper and lower servos             | Seed dispenser gate mechanism                                           |
+| RGB LED                            | Robot status indication                                                 |
+| Mechanical stop button             | Pause / kill-switch behaviour                                           |
+| Revive button                      | Revive/contact trigger behaviour                                        |
+| WiFi/MQTT server link              | Map, fertility, airlock, heartbeat, emergency, and revive communication |
+
+---
+
+## Important Pin and Address Configuration
+
+The final configuration is defined mainly in `Main.ino`.
+
+| Item                            | Configuration                  |
+| ------------------------------- | ------------------------------ |
+| Top RGB LED red                 | Pin `39`                       |
+| Top RGB LED green               | Pin `35`                       |
+| Top RGB LED blue                | Pin `37`                       |
+| Mechanical stop button          | Pin `33`, active low           |
+| Revive button                   | Pin `13`, active low           |
+| Line sensor pins                | `2, 3, 4, 5, 8, 9, 10, 11, 12` |
+| Left encoder                    | `A = 28`, `B = 26`             |
+| Right encoder                   | `A = 22`, `B = 24`             |
+| RFID reader                     | I2C address `0x28`, on `Wire1` |
+| Motoron controller              | I2C address `0x10`, on `Wire1` |
+| Upper seed servo                | Pin `36`                       |
+| Lower seed servo                | Pin `38`                       |
+| Forward ultrasonic trigger/echo | Trigger `52`, echo `53`        |
+| Side ultrasonic trigger/echo    | Trigger `47`, echo `46`        |
+| Serial baud rate                | `115200`                       |
 
 ---
 
 ## Required Libraries
 
-The final Arduino code uses the following main libraries:
+The final Arduino code uses these main libraries:
 
 ```cpp
 #include <Arduino.h>
@@ -97,18 +136,21 @@ The final Arduino code uses the following main libraries:
 #include <Motoron.h>
 #include <math.h>
 #include <MFRC522_I2C.h>
+#include "ArenaTypes.h"
 ```
 
-Required external libraries:
+The messaging layer also uses WiFi/MQTT-related Arduino networking functionality.
 
-| Library | Purpose |
-|---|---|
-| `Motoron` | Communication with the Motoron motor controller |
-| `MFRC522_I2C` | RFID reader communication over I2C |
-| `Wire` | I2C communication |
-| Arduino core libraries | General Arduino GIGA R1 functions |
+Before compiling, make sure the following are available in Arduino IDE or PlatformIO:
 
-Before compiling, make sure these libraries are installed in Arduino IDE or PlatformIO.
+| Library / Dependency          | Purpose                                |
+| ----------------------------- | -------------------------------------- |
+| Arduino GIGA R1 board package | Arduino GIGA R1 WiFi support           |
+| `Wire`                        | I2C communication                      |
+| `Motoron`                     | Motoron motor controller communication |
+| `MFRC522_I2C`                 | RFID reader communication over I2C     |
+| Arduino WiFi / MQTT support   | Server communication in `Messages.ino` |
+| Arduino core libraries        | General Arduino functions              |
 
 ---
 
@@ -126,21 +168,21 @@ Open the repository folder on your computer.
 
 ### 2. Open the Final Code
 
-Open the following file in Arduino IDE:
+Open this file in Arduino IDE:
 
 ```text
 Jason_combined_code/Main.ino
 ```
 
-Arduino IDE should automatically load the other `.ino` files in the same folder as tabs.
+Arduino IDE should automatically load the other `.ino` files in `Jason_combined_code/` as tabs.
 
-The final code depends on all files inside:
+The final code depends on the full folder:
 
 ```text
 Jason_combined_code/
 ```
 
-Do not upload only `Main.ino` by itself without the other files in the same folder.
+Do not move `Main.ino` out of this folder unless all related `.ino` files and `ArenaTypes.h` are moved with it.
 
 ---
 
@@ -159,29 +201,47 @@ Use the M7 core if the IDE asks for the target core.
 
 ### 4. Install Required Libraries
 
-Install these libraries through Arduino Library Manager or manually:
+Install the required external libraries through Arduino Library Manager or manually:
 
 ```text
 Motoron
 MFRC522_I2C
 ```
 
-The built-in Arduino libraries such as `Wire` and `Arduino.h` should already be available.
+Also make sure the Arduino GIGA R1 WiFi board package and WiFi/MQTT dependencies are installed.
 
 ---
 
-### 5. Check WiFi / Server Settings
+### 5. Check WiFi and Server Settings
 
-The code contains WiFi and server communication settings for the robotics challenge environment.
+The final code contains WiFi and MQTT/server settings for the robotics challenge environment.
 
-Before uploading, check the WiFi SSID, WiFi password, UDP/MQTT/server settings, and RFID/server communication settings.
+Before uploading, check:
 
-For security, real WiFi credentials should not be shared in a public repository. If the repository is public, replace private credentials with placeholders such as:
+```text
+WiFi SSID
+WiFi password
+MQTT broker address
+Team ID
+Board ID
+Server board ID
+Airlock/server message format
+```
+
+Security warning:
+
+```text
+Do not leave real WiFi credentials in a public GitHub repository.
+```
+
+If the repository is public, replace real credentials with placeholders, for example:
 
 ```cpp
 constexpr const char* WIFI_SSID = "YOUR_WIFI_SSID";
 constexpr const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
 ```
+
+Then document the real credentials privately for the team.
 
 ---
 
@@ -205,26 +265,30 @@ After uploading, open Serial Monitor at:
 
 ## How to Run the Robot
 
-1. Place the robot at the correct starting position.
+1. Place the robot at the correct start position.
 2. Turn on the robot power system.
 3. Connect the Arduino GIGA R1 to the computer if Serial Monitor is needed.
 4. Upload the final code from `Jason_combined_code/`.
 5. Open Serial Monitor at `115200`.
 6. During startup, the robot runs calibration:
-   - IR sensor calibration
-   - IMU stillness wait
-   - Gyro Z-axis bias calibration
-7. After calibration, the robot enters its mission state machine.
-8. The robot can perform behaviours such as:
-   - base line following
-   - tunnel entry
-   - wall following
-   - arena behaviour
-   - RFID scanning
-   - obstacle avoidance
-   - seed dispensing
-   - return-to-base sequence
-   - emergency stop / pause behaviour
+
+   * IR line sensor calibration
+   * IMU stillness wait
+   * Gyro Z-axis bias calibration
+7. After calibration, the robot enters the mission state machine.
+8. The default mission phase in the final code starts from `BaseToGate`.
+9. The robot then follows the configured mission logic:
+
+   * base line following
+   * RFID handling
+   * tunnel entry
+   * wall following
+   * arena behaviour
+   * obstacle avoidance fallback
+   * pathfinding if an arena goal is set
+   * return-to-base if commanded
+   * revive behaviour if commanded
+   * seed dispensing when planting is triggered
 
 ---
 
@@ -232,83 +296,128 @@ After uploading, open Serial Monitor at:
 
 The final integrated code includes serial commands for testing and selecting behaviours.
 
-| Command | Action |
-|---|---|
-| `0` | Toggle running / paused state |
-| `9` | Run RFID server test |
-| `8` | Reset and select obstacle avoidance sequence |
-| `4` | Trigger return-to-base sequence |
-| `7` | Run Test 8 / revival mission |
+| Command    | Action                                                                            |
+| ---------- | --------------------------------------------------------------------------------- |
+| `0`        | Toggle running / paused state                                                     |
+| `9`        | Run RFID server test: scan one tag, send `isFertile`, and print UID/fertility/x/y |
+| `8`        | Reset and select the obstacle avoidance sequence                                  |
+| `4`        | Trigger return-to-base sequence through Tunnel A                                  |
+| `7`        | Run Test 8 / revive mission                                                       |
+| `x` or `X` | Stop during some blocking test routines                                           |
 
 ---
 
 ## Main Software Overview
 
-The final version is organised around a mission-level state machine in `Main.ino`.
+The final version is organised around `Main.ino`, which initialises hardware, runs calibration, handles serial/buttons, and dispatches behaviours through a mission-level state machine.
 
 ```mermaid
-flowchart LR
-    A[Startup] --> B[Initialise hardware]
-    B --> C[IR sensor calibration]
-    C --> D[IMU stillness wait]
-    D --> E[Gyro calibration]
-    E --> F[Robot ready]
-
-    F --> G[Mission State Machine]
-
-    G --> H[BaseToGate]
-    G --> I[Tunnel]
-    G --> J[Arena]
-    G --> K[ArenaToEntryGate]
-    G --> L[TunnelReturn]
-    G --> M[BaseReturnToParking]
-
-    H --> N[Line following]
-    H --> O[RFID handling]
-    I --> P[Wall following]
-    J --> Q[Obstacle avoidance / pathfinding]
-    K --> R[Return-to-base pathfinding]
-    L --> S[Inbound tunnel / airlock]
-    M --> T[Parking line following]
-
-    N --> U[Motoron motor control]
-    P --> U
-    Q --> U
-    S --> U
+flowchart TD
+    A[Power on / reset] --> B[Serial start at 115200]
+    B --> C[Initialise Motoron]
+    C --> D[Initialise IMU]
+    D --> E[Initialise encoders]
+    E --> F[Initialise LED and buttons]
+    F --> G[Initialise RFID]
+    G --> H[Initialise servos]
+    H --> I[Initialise tunnel logic]
+    I --> J[Initialise tunnel return logic]
+    J --> K[Initialise obstacle avoidance]
+    K --> L[Initialise WiFi/MQTT messages]
+    L --> M[IR calibration]
+    M --> N[IMU stillness wait]
+    N --> O[Gyro Z bias calibration]
+    O --> P[Robot ready]
+    P --> Q[Mission state machine]
 ```
 
 ---
 
-## Main Software Components
+## Mission State Machine
+
+The main mission phases are:
+
+```text
+BaseToGate
+Tunnel
+Arena
+ArenaToEntryGate
+TunnelReturn
+BaseReturnToParking
+```
 
 ```mermaid
 flowchart TD
-    Sensors[Sensor Inputs] --> Logic[Main Robot Logic]
+    A[Robot Ready] --> B{Mission Phase}
 
-    IR[9-channel IR Line Sensors] --> Sensors
-    IMU[IMU / Gyro] --> Sensors
-    RFID[RFID Reader] --> Sensors
-    US[Ultrasonic Sensors] --> Sensors
-    ENC[Wheel Encoders] --> Sensors
-    Buttons[Stop and Revive Buttons] --> Sensors
+    B --> C[BaseToGate]
+    B --> D[Tunnel]
+    B --> E[Arena]
+    B --> F[ArenaToEntryGate]
+    B --> G[TunnelReturn]
+    B --> H[BaseReturnToParking]
 
-    Logic --> Mission[Mission State Machine]
-    Mission --> Line[Line Following]
-    Mission --> Tunnel[Tunnel / Wall Following]
-    Mission --> Arena[Arena Pathfinding]
-    Mission --> Avoid[Obstacle Avoidance]
-    Mission --> Return[Return-to-Base Logic]
-    Mission --> Planting[Seed Dispensing]
+    C --> C1[Handle RFID]
+    C --> C2[Follow base line]
+    C --> C3[Detect base gate with forward ultrasonic]
+    C3 --> D
 
-    Line --> Motors[Motoron Motor Control]
-    Tunnel --> Motors
-    Arena --> Motors
-    Avoid --> Motors
-    Return --> Motors
+    D --> D1[Wait at base gate]
+    D1 --> D2[Drive into tunnel]
+    D2 --> D3[Wall follow]
+    D3 --> D4[Wait at exit gate]
+    D4 --> D5[Pass exit gate]
+    D5 --> E
 
-    Planting --> Servos[Upper and Lower Servos]
-    Logic --> LED[RGB LED Status]
-    Logic --> Server[WiFi / Server Messages]
+    E --> E1{Arena goal available?}
+    E1 -->|Yes| E2[Arena pathfinding]
+    E1 -->|No| E3[Obstacle avoidance swerve]
+
+    F --> G
+    G --> G1[Pathfind to Tunnel A doorway]
+    G1 --> G2[Request outer door]
+    G2 --> G3[Drive into airlock]
+    G3 --> G4[Wall follow return tunnel]
+    G4 --> G5[Request inner door]
+    G5 --> H
+
+    H --> H1[Parking line-follow placeholder]
+```
+
+---
+
+## Sensor and Actuator Software Architecture
+
+```mermaid
+flowchart TD
+    SENSORS[Sensor Inputs] --> MAIN[Main.ino Mission Logic]
+
+    IR[9-channel IR/QTR line sensors] --> SENSORS
+    IMU[IMU / Gyro] --> SENSORS
+    RFID[RFID Reader] --> SENSORS
+    USF[Forward Ultrasonic Sensor] --> SENSORS
+    USS[Side Ultrasonic Sensor] --> SENSORS
+    ENC[Wheel Encoders] --> SENSORS
+    BUTTONS[Stop and Revive Buttons] --> SENSORS
+    MQTT[WiFi/MQTT Server Messages] --> MAIN
+
+    MAIN --> LINE[Line Following]
+    MAIN --> TUNNEL[Tunnel / Wall Following]
+    MAIN --> PATH[Arena Pathfinding]
+    MAIN --> AVOID[Obstacle Avoidance]
+    MAIN --> RETURN[Return-to-Base]
+    MAIN --> REVIVE[Test 8 Revive]
+    MAIN --> PLANT[Seed Planting]
+
+    LINE --> MOTORS[Motoron Motor Control]
+    TUNNEL --> MOTORS
+    PATH --> MOTORS
+    AVOID --> MOTORS
+    RETURN --> MOTORS
+    REVIVE --> MOTORS
+
+    PLANT --> SERVOS[Upper and Lower Servos]
+    MAIN --> LED[RGB LED Status]
 ```
 
 ---
@@ -317,22 +426,24 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A[Power on / reset] --> B[Start Serial at 115200]
-    B --> C[Initialise Motoron]
-    C --> D[Initialise IMU]
-    D --> E[Initialise encoders]
-    E --> F[Initialise LED and buttons]
-    F --> G[Initialise RFID]
-    G --> H[Initialise servos]
-    H --> I[Initialise tunnel and obstacle modules]
-    I --> J[Initialise server messages]
-    J --> K[Start IR calibration]
-
-    K --> L[Move IR sensors over floor and line for 5 seconds]
-    L --> M[Yellow LED: keep robot flat and still]
-    M --> N[Calibrate gyro Z-axis bias]
-    N --> O[Robot ready]
+    A[Power on / reset] --> B[Initialise hardware]
+    B --> C[Blue LED: IR calibration]
+    C --> D[Move sensors over floor and line for 5 seconds]
+    D --> E[Print min/max calibration values]
+    E --> F[Yellow LED: keep robot flat and still]
+    F --> G[Wait for still IMU period]
+    G --> H[Calibrate gyro Z-axis bias]
+    H --> I[Robot ready]
 ```
+
+Calibration sequence:
+
+| Stage                 | Description                                                               |
+| --------------------- | ------------------------------------------------------------------------- |
+| IR calibration        | Move the line sensor array over both floor and line for around 5 seconds. |
+| IMU stillness wait    | Keep the robot flat and still when the LED is yellow.                     |
+| Gyro bias calibration | The robot samples gyro Z-axis bias and uses it for turn-angle correction. |
+| Ready                 | The robot enters the mission state machine after calibration finishes.    |
 
 ---
 
@@ -340,44 +451,75 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A[Read IR sensor values] --> B[Calibrate sensor readings]
-    B --> C{Line detected?}
+    A[Read RC discharge times from 9 sensors] --> B[Update calibrated values]
+    B --> C[Check whether line is found]
 
-    C -->|Yes| D[Calculate line position]
-    D --> E[Calculate error from centre]
-    E --> F[Apply proportional steering]
-    F --> G[Set left and right motor speeds]
+    C -->|No| D[Enter line gap state]
+    D --> E[Drive forward briefly]
+    E --> F[Lost-line recovery using last known side]
+    F --> A
 
-    C -->|No| H[Enter line gap or lost-line recovery]
-    H --> I[Move/search using last known line side]
+    C -->|Yes| G[Estimate weighted line position]
+    G --> H[Calculate error from centre]
+    H --> I[Apply proportional motor correction]
     I --> A
 
-    D --> J{Junction detected?}
-    J -->|No| A
-    J -->|Yes| K[Classify junction]
-    K --> L[Apply turn or crossing behaviour]
+    C -->|Yes| J[Detect junction type]
+    J --> K{Special junction?}
+    K -->|No| G
+    K -->|Left turn| L[Centre after IR then turn left]
+    K -->|Right turn| M[Centre after IR then turn right]
+    K -->|T or wide intersection| N[Centre after IR then turn right]
     L --> A
+    M --> A
+    N --> A
+```
+
+The line-following logic includes:
+
+```text
+Line detection threshold with hysteresis
+Weighted line position estimation
+Junction classification
+Line gap recovery
+Lost-line recovery
+Proportional steering control
+Turn recovery memory
 ```
 
 ---
 
-## Obstacle Avoidance Flow
+## IMU Turning Flow
 
 ```mermaid
 flowchart TD
-    A[Start in LineFollow state] --> B[Follow line]
-    B --> C{Obstacle detected?}
+    A[Start turn command] --> B{Motoron ready?}
+    B -->|No| C[Abort turn]
+    B -->|Yes| D{Gyro ready?}
+    D -->|No| C
+    D -->|Yes| E[Reset turn angle]
 
-    C -->|No| B
-    C -->|Yes| D[Approach obstacle]
-    D --> E[Turn right]
-    E --> F[Go straight until first junction]
-    F --> G[Turn left]
-    G --> H[Go straight until second junction]
-    H --> I[Turn left again]
-    I --> J[Go straight until third junction]
-    J --> K[Obstacle avoidance complete]
-    K --> L[Resume mission]
+    E --> F[Spin left or right]
+    F --> G[Integrate gyro Z angle]
+    G --> H{Ignore-line angle passed?}
+    H -->|No| I{Max angle or timeout?}
+    H -->|Yes| J{Line detected during turn?}
+
+    J -->|Yes| K[Stop, mark line found, return success]
+    J -->|No| I
+
+    I -->|No| F
+    I -->|Timeout or max angle| L[Stop and enter lost-line recovery]
+```
+
+Turning functions:
+
+```text
+turnLeft90WithLines()
+turnRight90WithLines()
+turnLeft180WithLines()
+turnRight180WithLines()
+turnAngleOnly()
 ```
 
 ---
@@ -386,69 +528,191 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A[Wait at base gate] --> B{Forward ultrasonic distance > door open threshold?}
+    A[WaitAtBaseGate] --> B{Forward distance > base door open threshold?}
     B -->|No| A
-    B -->|Yes| C[Drive into tunnel]
+    B -->|Yes| C[DrivingIntoTunnel]
 
-    C --> D{Side wall detected?}
+    C --> D{Minimum encoder distance travelled?}
     D -->|No| C
-    D -->|Yes| E[Wall follow using side ultrasonic sensor]
+    D -->|Yes| E{Side wall detected or timeout?}
 
-    E --> F{Exit gate detected ahead?}
-    F -->|No| E
-    F -->|Yes| G[Stop and wait at exit gate]
+    E -->|No| C
+    E -->|Yes| F[WallFollow]
 
-    G --> H{Exit gate opened?}
+    F --> G{Exit gate detected ahead?}
+    G -->|No| F
+    G -->|Yes| H[WaitAtExitGate]
+
+    H --> I{Exit gate opened?}
+    I -->|No| H
+    I -->|Yes| J[PassingExitGate]
+
+    J --> K{Through exit gate?}
+    K -->|No| J
+    K -->|Yes| L[Enter Arena phase]
+```
+
+The wall-following controller uses the side ultrasonic sensor and a proportional correction:
+
+```text
+error = side_distance - target_side_distance
+correction = WALL_KP * error
+left_speed = base_speed - correction
+right_speed = base_speed + correction
+```
+
+---
+
+## Obstacle Avoidance Flow
+
+`ObstacleAvoid.ino` implements a scripted swerve sequence around an obstacle.
+
+```mermaid
+flowchart TD
+    A[LineFollow] --> B[Follow line without automatic junction turns]
+    B --> C{Obstacle ahead by ultrasonic?}
+
+    C -->|No| B
+    C -->|Yes| D[ApproachObstacle]
+
+    D --> E[Continue line following until RFID junction]
+    E --> F[TurnRight]
+    F --> G[GoStraightUntilJunc1]
+
+    G --> H{Obstacle cleared and RFID junction reached?}
     H -->|No| G
-    H -->|Yes| I[Pass through exit gate]
+    H -->|Yes| I[TurnLeft1]
 
-    I --> J[Enter arena]
+    I --> J[GoStraightUntilJunc2]
+    J --> K{Obstacle cleared and RFID junction reached?}
+    K -->|No| J
+    K -->|Yes| L[TurnLeft2]
+
+    L --> M[GoStraightUntilJunc3]
+    M --> N{RFID junction reached?}
+    N -->|No| M
+    N -->|Yes| O[Done]
+
+    O --> P[Stop motors and reset swerve state]
+```
+
+This behaviour relies on:
+
+```text
+Forward ultrasonic obstacle detection
+RFID tag detection at junctions
+Line following with junction turns suppressed
+IMU/line-based 90-degree turns
 ```
 
 ---
 
-## RFID / Planting Flow
+## Arena Pathfinding Flow
+
+`ArenaPathfinding.ino` provides weighted navigation for the arena.
 
 ```mermaid
 flowchart TD
-    A[Robot moves through arena] --> B{RFID tag detected?}
+    A[Request getMap from server] --> B[Decode 21-byte 9x9 map]
+    B --> C[Store map in 11x11 planner grid]
+    C --> D[Update pose using RFID and isFertile reply]
+    D --> E{Pose known?}
 
-    B -->|No| A
-    B -->|Yes| C[Read RFID UID]
-    C --> D[Send tag information to server]
-    D --> E{Server says location is fertile?}
+    E -->|No| F[Wait for first known RFID pose]
+    F --> D
 
-    E -->|No| F[Do not plant]
-    F --> A
+    E -->|Yes| G[Run weighted Dijkstra to goal]
+    G --> H{Path found?}
 
-    E -->|Yes| G{Seeds remaining?}
-    G -->|No| H[Stop planting behaviour]
-    G -->|Yes| I[Run seed dispenser servo sequence]
-    I --> J[Decrease seed count]
-    J --> A
+    H -->|No| I[Stop and report no path]
+    H -->|Yes| J[Take next cell in path]
+
+    J --> K{Obstacle ahead?}
+    K -->|Yes| L[Temporarily block next cell]
+    L --> G
+
+    K -->|No| M[Turn toward next cell]
+    M --> N[Drive one cell using line following]
+    N --> O{RFID confirms pose?}
+
+    O -->|Yes| P[Update pose from RFID/server]
+    O -->|No| Q[Estimate pose by dead reckoning]
+
+    P --> R{Goal reached?}
+    Q --> R
+
+    R -->|No| G
+    R -->|Yes| S[Stop motors]
+```
+
+Map states:
+
+```text
+0 = unknown
+1 = seeded
+2 = fertile
+3 = infertile
+```
+
+The pathfinder uses weighted costs so that explored cells and lower-y cells can be preferred, while unknown cells and temporary obstacles receive different costs.
+
+---
+
+## RFID and Server Flow
+
+```mermaid
+flowchart TD
+    A[RFID tag detected] --> B[Convert UID to text]
+    B --> C[Send isFertile request to server]
+    C --> D[Wait for fertility/location reply]
+
+    D --> E{Reply received?}
+    E -->|No| F[Print no reply / fallback if available]
+    E -->|Yes| G[Read x, y, and state]
+
+    G --> H{State fertile?}
+    H -->|Yes| I[Plant if mission logic requires it]
+    H -->|No| J[Do not plant]
+
+    G --> K[Update arena pose]
+```
+
+The `9` serial command runs a manual RFID/server diagnostic:
+
+```text
+Scan RFID tag
+Send isFertile request
+Wait for server reply
+Print UID
+Print server state
+Print fertility
+Print x/y coordinates
 ```
 
 ---
 
-## Emergency Stop / Kill Switch Flow
+## Seed Dispensing Flow
 
 ```mermaid
 flowchart TD
-    A[Robot running] --> B{Stop button pressed?}
-
-    B -->|No| C[Continue current mission behaviour]
-    C --> A
-
-    B -->|Yes| D[Toggle running state]
-    D --> E{Running enabled?}
-
-    E -->|No| F[Stop motors]
-    F --> G[Flash red LED]
-    G --> H[Wait for button press or serial command]
-
-    E -->|Yes| I[Resume mission]
-    I --> A
+    A[Plant command] --> B[Close both gates]
+    B --> C[Centre robot after RFID]
+    C --> D[Stop motors]
+    D --> E[Open upper servo gate]
+    E --> F[Close upper servo gate]
+    F --> G[Open lower servo gate]
+    G --> H[Close lower servo gate]
+    H --> I[Dispense cycle complete]
 ```
+
+The dispenser uses two servos:
+
+```text
+Upper servo: controls seed loading gate
+Lower servo: controls seed release gate
+```
+
+Servo pulses are manually serviced using `serviceServoPulses()` instead of relying on a standard Servo library.
 
 ---
 
@@ -456,41 +720,118 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A[Return command selected] --> B[Pathfind to Tunnel A doorway cell]
-    B --> C{Reached doorway?}
+    A[Serial command 4 selected] --> B[Set mission phase to ArenaToEntryGate]
+    B --> C[Pathfind to Tunnel A doorway cell]
+    C --> D{Reached doorway?}
 
-    C -->|No| D[Retry pathfinding]
-    D --> B
+    D -->|No| E[Retry next tick]
+    E --> C
 
-    C -->|Yes| E[Request outer airlock door]
-    E --> F[Wait for outer door to open]
-    F --> G[Drive into airlock]
-    G --> H[Wall follow through return tunnel]
-    H --> I[Request inner door]
-    I --> J[Wait for inner door to open]
-    J --> K[Pass inner door]
-    K --> L[Enter base]
-    L --> M[Base return to parking]
+    D -->|Yes| F[Request outer Tunnel A door]
+    F --> G[Wait until forward ultrasonic says door opened]
+    G --> H[Drive into airlock]
+    H --> I[Detect side wall or timeout]
+    I --> J[Wall follow return tunnel]
+    J --> K[Reach inner door]
+    K --> L[Request inner door]
+    L --> M[Wait for inner door to open]
+    M --> N[Pass inner door]
+    N --> O[Enter base]
+    O --> P[BaseReturnToParking]
 ```
+
+Current limitation:
+
+```text
+BaseReturnToParking is still a placeholder and currently uses general line following.
+```
+
+---
+
+## Test 8 / Revive Flow
+
+`Test8.ino` implements a revive mission using server revive broadcasts, forward ultrasonic distance, line sensors, and the revive button.
+
+```mermaid
+flowchart TD
+    A[Serial command 7 selected] --> B{Robot calibrated and running?}
+    B -->|No| C[Print error and stop]
+    B -->|Yes| D[Update pose from RFID if possible]
+
+    D --> E[Select known revive target if available]
+    E --> F[Approach object using forward ultrasonic sensor]
+
+    F --> G{Within 10 cm?}
+    G -->|No| F
+    G -->|Yes| H[Slow approach]
+
+    H --> I{Revive button pressed?}
+    I -->|No| H
+    I -->|Yes| J[Hold revive for 5 seconds]
+
+    J --> K[Send revive request if target ID known]
+    K --> L[Reverse until RFID tag is found]
+    L --> M[Stop and show green LED]
+```
+
+Test 8 can still operate in a distance-sensor-only mode if no server revive target is known.
+
+---
+
+## Stop / Emergency Behaviour
+
+The final code includes both physical and software stop handling.
+
+```mermaid
+flowchart TD
+    A[Robot running] --> B{Stop button pressed?}
+    B -->|No| C{Serial stop command?}
+    C -->|No| D{Remote emergency/disable?}
+    D -->|No| E[Continue mission]
+    E --> A
+
+    B -->|Yes| F[Toggle running state]
+    C -->|Yes| G[Stop motors]
+    D -->|Yes| G
+
+    F --> H{Running enabled?}
+    H -->|Yes| E
+    H -->|No| G
+
+    G --> I[Stop motors]
+    I --> J[Flash red LED or print stop message]
+```
+
+Stop inputs are checked in the main loop and inside some blocking test routines such as turning, pathfinding, and revive behaviour.
 
 ---
 
 ## Testing and Calibration Evidence
 
-Testing evidence is stored in the documentation folders and may include notes, screenshots, logs, and test results.
+Testing evidence should be stored in the documentation folders and may include notes, logs, screenshots, serial monitor output, and short videos.
 
-Recommended evidence to include in `docs/test_logs/`:
+Recommended folder:
 
 ```text
 docs/test_logs/
+```
+
+Recommended logs:
+
+```text
+docs/test_logs/
+├── final_viva_test_log.md
 ├── imu_calibration_log.md
 ├── line_following_test_log.md
 ├── motor_encoder_test_log.md
+├── rfid_reader_test_log.md
 ├── rfid_server_test_log.md
+├── mqtt_messages_test_log.md
 ├── obstacle_avoidance_test_log.md
 ├── tunnel_wall_following_test_log.md
+├── arena_pathfinding_test_log.md
 ├── seed_dispenser_test_log.md
-└── final_viva_test_log.md
+└── test8_revive_test_log.md
 ```
 
 Each test log should include:
@@ -499,6 +840,7 @@ Each test log should include:
 Date:
 Test name:
 Code version:
+Commit used:
 Hardware setup:
 Parameters used:
 What worked:
@@ -512,10 +854,24 @@ Example:
 ```text
 Test name: RFID server test
 Code version: Jason_combined_code
-Result: RFID tag was detected and the robot sent the tag information to the server.
-What worked: RFID UID reading and serial output.
-What did not work: Server response was inconsistent during some runs.
-Change made: Added cooldown time between RFID scans.
+Serial command: 9
+
+Result:
+The RFID reader detected a tag and sent an isFertile request to the server.
+
+What worked:
+- UID reading
+- Server request
+- Serial output for UID and x/y
+
+What did not work:
+- Server reply was sometimes delayed
+
+Change made:
+- Added timeout handling and printed NO_REPLY when no response arrived
+
+Final result:
+RFID-server diagnostic worked when the server was online and the tag was close enough to the reader.
 ```
 
 ---
@@ -527,62 +883,123 @@ The robot requires calibration before reliable operation.
 Main calibration steps:
 
 1. IR line sensors:
-   - Move the sensor array over both the floor and the black line during startup.
-   - The calibration lasts around 5 seconds.
-   - This improves line detection and junction classification.
+
+   * Move the sensor array over both the floor and the line during startup.
+   * The calibration lasts around 5 seconds.
+   * This improves line detection, line position estimation, and junction classification.
 
 2. IMU gyro:
-   - Place the robot flat and still when the yellow LED is shown.
-   - The robot measures gyro Z-axis bias.
-   - This improves turning accuracy.
 
-3. Ultrasonic sensors:
-   - Check forward and side distance readings before tunnel tests.
-   - Verify that the wall-following distance threshold is suitable.
+   * Place the robot flat and still when the LED is yellow.
+   * The robot samples the gyro Z-axis bias.
+   * This improves IMU-based turning.
 
-4. Motor direction:
-   - Test left and right motors separately after wiring changes.
-   - Keep the wheels raised during the first motor test.
+3. Motor and encoder direction:
 
-5. RFID:
-   - Confirm that the RFID reader can detect known tags.
-   - Check that RFID readings are sent correctly to the server.
+   * Test each motor direction after wiring changes.
+   * Test encoder direction before using encoder-based centring or tunnel movement.
+   * Keep the robot wheels raised during first motor tests.
+
+4. Ultrasonic sensors:
+
+   * Check forward and side distance readings before tunnel and obstacle tests.
+   * Confirm that distance thresholds match the actual arena setup.
+
+5. RFID reader:
+
+   * Confirm the reader is detected at I2C address `0x28`.
+   * Confirm known tags can be read reliably.
+   * Check tag distance and orientation.
 
 6. Seed dispenser:
-   - Test upper and lower servo angles before loading seeds.
-   - Confirm that only one seed is released per planting cycle.
+
+   * Test upper and lower servo angles before loading seeds.
+   * Confirm only one seed is released per dispense cycle.
+
+7. MQTT/server:
+
+   * Confirm WiFi connects to the correct network.
+   * Confirm MQTT messages can be sent and received.
+   * Test `register`, `heartbeat`, `isFertile`, `getMap`, `openAirlock`, and revive messages separately if possible.
 
 ---
 
 ## Known Limitations
 
-The final integrated code combines several behaviours into one Arduino project. Some modules were tested more heavily than others.
+The final integrated code is a combined competition build. Some behaviours are more mature than others.
 
 Known limitations:
 
-- Fine movement may vary depending on battery level, floor friction, and wheel alignment.
-- Line following can become unstable if the lighting changes or if the line sensor calibration is poor.
-- RFID detection depends on tag position and reader distance.
-- Ultrasonic readings can fluctuate near walls, corners, or angled surfaces.
-- Obstacle avoidance and pathfinding may require manual reset if the robot starts from an unexpected pose.
-- WiFi/server communication depends on the challenge network and server availability.
-- Some older folders in the repository are archived prototypes and should not be treated as the final assessed version.
+* Real WiFi credentials should not be left in a public repository.
+* WiFi/MQTT communication is non-blocking, so the robot can continue moving when WiFi is unavailable, but server-dependent behaviours may fail or fall back.
+* `BaseReturnToParking` is currently a placeholder and uses general line following rather than a fully developed parking routine.
+* Arena pathfinding depends on having a known RFID pose. If no RFID pose is obtained, the robot may not be able to pathfind.
+* If RFID confirmation is not received during arena movement, pose may be estimated by dead reckoning, which can accumulate error.
+* The arena pathfinder uses a simplified 11x11 planning grid around the 9x9 playable arena and assumes the server map format matches the expected 21-byte packed map.
+* Temporary obstacle handling depends on the forward ultrasonic sensor; angled surfaces or noisy readings may cause false obstacle detection.
+* The obstacle avoidance sequence is scripted and assumes the obstacle and junction layout match the tested path.
+* Tunnel wall following assumes the wall is on the expected side. The return tunnel code notes that the wall-following direction may need mirroring if the wall is on the opposite side.
+* Line following can become unstable if lighting changes, the sensor height changes, or IR calibration is poor.
+* IMU turning depends on successful gyro detection and still calibration. Drift or vibration can reduce turn accuracy.
+* RFID detection depends on tag position, reader distance, and reader orientation.
+* The seed dispenser uses manually generated servo pulses, so long blocking code sections must continue calling `serviceServoPulses()`.
+* Some routines are blocking for several seconds, although many of them still service messages, servos, and stop inputs during the blocking period.
+* The revive mission can run in distance-sensor-only mode, but full revive target selection depends on receiving valid server revive broadcasts.
+* Some older folders in the repository are archived prototypes and should not be treated as the final assessed version.
+
+---
+
+## Useful Serial Debug Output
+
+The code prints useful debug information to Serial Monitor at `115200`.
+
+Examples of useful outputs:
+
+```text
+motoron_ready=
+IMU bus=
+IMU ready=
+RFID found at 0x28
+Calibration complete.
+running=
+state=
+junction=
+line=
+error=
+motor=
+gyro_z=
+turn_deg=
+Left encoder=
+Right encoder=
+MESSAGE:
+rfid_uid=
+server_state=
+fertility=
+x= y=
+arena_path_len=
+arena_next x= y=
+test8_stage=
+```
+
+These outputs can be copied into test logs as evidence.
 
 ---
 
 ## Final Submission Checklist
 
-The GitHub repository includes the following required submission contents:
+The GitHub repository should include:
 
-- [x] Latest code version
-- [x] Final viva/test run code clearly identified as `Jason_combined_code/`
-- [x] README explaining repository structure
-- [x] Required libraries listed
-- [x] Setup and upload instructions
-- [x] Software overview diagram
-- [x] Flowcharts for key behaviours
-- [x] Testing/calibration evidence section
-- [x] Notes on what worked and what did not work
+* [x] Latest code version
+* [x] Final viva/test run code clearly identified as `Jason_combined_code/`
+* [x] README explaining repository structure
+* [x] README explaining every final code file
+* [x] Required libraries listed
+* [x] Setup and upload instructions
+* [x] Software overview diagram
+* [x] Flowcharts for key behaviours
+* [x] Testing/calibration evidence section
+* [x] Known limitations section
+* [x] Notes on what worked and what may still fail
 
 ---
 
@@ -596,4 +1013,16 @@ Jason_combined_code/
 
 Please use this folder as the final viva/test run version.
 
-Other folders such as `Old/`, `Test3/`, `Test8/`, `Programming_Viva/`, `Jason_wall_following_main/`, `src/`, and `Main/` are kept for reference, testing, diagnostics, or earlier development history.
+Other folders such as:
+
+```text
+Old/
+Test3/
+Test8/
+Programming_Viva/
+Jason_wall_following_main/
+src/
+Main/
+```
+
+are kept for reference, diagnostics, earlier prototypes, or development history.
