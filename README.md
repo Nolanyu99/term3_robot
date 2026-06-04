@@ -889,42 +889,6 @@ Known limitations:
 
 ---
 
-## Useful Serial Debug Output
-
-The code prints useful debug information to Serial Monitor at `115200`.
-
-Examples of useful outputs:
-
-```text
-motoron_ready=
-IMU bus=
-IMU ready=
-RFID found at 0x28
-Calibration complete.
-running=
-state=
-junction=
-line=
-error=
-motor=
-gyro_z=
-turn_deg=
-Left encoder=
-Right encoder=
-MESSAGE:
-rfid_uid=
-server_state=
-fertility=
-x= y=
-arena_path_len=
-arena_next x= y=
-test8_stage=
-```
-
-These outputs can be copied into test logs as evidence.
-
----
-
 ## Final Submission Checklist
 
 The GitHub repository should include:
